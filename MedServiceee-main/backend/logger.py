@@ -1,26 +1,18 @@
-"""
-Centralized logging configuration for MedServicePrice backend.
-Provides structured, leveled logging instead of raw print() statements.
-"""
+"""Centralized logging configuration for MedServicePrice backend."""
 
 import logging
 import sys
-from datetime import datetime
+
+# Ensure UTF-8 output on standard streams when possible
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def setup_logger(name: str = "medservice", level: int = logging.INFO) -> logging.Logger:
-    """
-    Create and configure a logger with console and structured formatting.
-
-    Args:
-        name: Logger name (used for module identification).
-        level: Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-
-    Returns:
-        Configured logging.Logger instance.
-    """
     logger = logging.getLogger(name)
-
     if logger.handlers:
         return logger
 
@@ -39,7 +31,6 @@ def setup_logger(name: str = "medservice", level: int = logging.INFO) -> logging
     return logger
 
 
-# Pre-configured loggers for each module
 api_logger = setup_logger("medservice.api")
 parser_logger = setup_logger("medservice.parser")
 search_logger = setup_logger("medservice.search")

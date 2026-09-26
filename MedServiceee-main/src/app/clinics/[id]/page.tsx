@@ -3,14 +3,18 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, MapPin, Phone, Clock, Star, Loader2 } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Clock, Star, Loader2, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { API_URL } from "@/lib/api";
 import type { ClinicDetail } from "@/lib/types";
 import type { Doctor } from "@/lib/types";
 import { DoctorProfileModal } from "@/components/DoctorProfileModal";
+import { build2GisRouteUrl, buildGoogleMapsRouteUrl } from "@/lib/maps";
+import { RouteDropdown } from "@/components/ui/RouteDropdown";
+import { useTranslation } from "@/i18n/LanguageContext";
 
 export default function ClinicDetailPage() {
+  const { t, locale } = useTranslation();
   const params = useParams();
   const router = useRouter();
   const [data, setData] = useState<ClinicDetail | null>(null);
@@ -53,9 +57,9 @@ export default function ClinicDetailPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Ошибка</h2>
+          <h2 className="text-xl font-semibold mb-2">{locale === 'en' ? 'Error' : (locale === 'kk' ? 'Қате' : 'Ошибка')}</h2>
           <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={() => router.back()}>Назад</Button>
+          <Button onClick={() => router.back()}>{locale === 'en' ? 'Back' : (locale === 'kk' ? 'Артқа' : 'Назад')}</Button>
         </div>
       </div>
     );
@@ -78,21 +82,24 @@ export default function ClinicDetailPage() {
       if (!response.ok) throw new Error("Не удалось отправить отзыв");
       const created = await response.json() as { average_rating?: number; reviews_count?: number };
       setData((previous) => previous ? { ...previous, clinic: { ...previous.clinic, rating: created.average_rating ?? previous.clinic.rating, reviews_count: created.reviews_count ?? previous.clinic.reviews_count } } : previous);
-      setReviewStatus("Спасибо за отзыв");
+      setReviewStatus(locale === 'en' ? "Thank you for your review!" : (locale === 'kk' ? "Пікіріңізге рақмет!" : "Спасибо за отзыв!"));
       setReviewComment("");
     } catch (reviewError: unknown) {
       setReviewStatus(reviewError instanceof Error ? reviewError.message : "Не удалось отправить отзыв");
     }
   };
 
+  const gisUrl = build2GisRouteUrl(clinic.name, clinic.city, clinic.address || "", clinic.latitude, clinic.longitude);
+  const googleMapsUrl = buildGoogleMapsRouteUrl(clinic.name, clinic.city, clinic.address || "", clinic.latitude, clinic.longitude);
+
   return (
     <div className="container mx-auto max-w-[1440px] px-4 py-8">
       <button
         onClick={() => router.back()}
-        className="flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors"
+        className="flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors font-medium text-sm"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
-        Назад к списку
+        {locale === 'en' ? 'Back to list' : (locale === 'kk' ? 'Тізімге оралу' : 'Назад к списку')}
       </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -107,7 +114,7 @@ export default function ClinicDetailPage() {
                 {clinic.rating || "N/A"}
               </div>
               <span className="text-muted-foreground text-sm">
-                ({clinic.reviews_count || 0} отзывов)
+                ({clinic.reviews_count || 0} {t('clinics.reviews')})
               </span>
             </div>
 
@@ -115,7 +122,7 @@ export default function ClinicDetailPage() {
               <div className="flex items-start gap-3">
                 <MapPin className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium">Адрес</p>
+                  <p className="text-sm font-medium">{locale === 'en' ? 'Address' : (locale === 'kk' ? 'Мекенжай' : 'Адрес')}</p>
                   <p className="text-sm text-muted-foreground">{clinic.city}, {clinic.address}</p>
                 </div>
               </div>
@@ -123,50 +130,53 @@ export default function ClinicDetailPage() {
               <div className="flex items-start gap-3">
                 <Phone className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium">Телефон</p>
-                  <p className="text-sm text-muted-foreground">{clinic.phone || "Не указан"}</p>
+                  <p className="text-sm font-medium">{locale === 'en' ? 'Phone' : (locale === 'kk' ? 'Телефон' : 'Телефон')}</p>
+                  <p className="text-sm text-muted-foreground">{clinic.phone || (locale === 'en' ? 'Not specified' : 'Не указан')}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
                 <Clock className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium">Время работы</p>
-                  <p className="text-sm text-muted-foreground">{clinic.working_hours || "Не указано"}</p>
+                  <p className="text-sm font-medium">{locale === 'en' ? 'Working Hours' : (locale === 'kk' ? 'Жұмыс уақыты' : 'Время работы')}</p>
+                  <p className="text-sm text-muted-foreground">{clinic.working_hours || (locale === 'en' ? 'Not specified' : 'Не указано')}</p>
                 </div>
               </div>
             </div>
 
-            <div className="mt-8">
-              {clinic.source_url ? (
-                <a href={clinic.source_url} target="_blank" rel="noopener noreferrer" className="block mb-4">
-                  <Button className="w-full">Записаться на сайте клиники</Button>
+            <div className="mt-8 space-y-3">
+              {clinic.source_url && (
+                <a href={clinic.source_url} target="_blank" rel="noopener noreferrer" className="block">
+                  <Button className="w-full">{locale === 'en' ? 'Visit Clinic Website' : (locale === 'kk' ? 'Клиника сайтына өту' : 'Записаться на сайте клиники')}</Button>
                 </a>
-              ) : (
-                <Button className="w-full mb-4">Записаться на прием</Button>
               )}
-              {clinic.latitude != null && clinic.longitude != null ? (
-                  <div className="w-full h-48 bg-muted rounded-xl overflow-hidden border border-border">
-                    <iframe
-                      title={`Карта ${clinic.name}`}
-                      width="100%"
-                      height="100%"
-                      frameBorder="0"
-                      style={{ border: 0 }}
-                      src={`https://maps.google.com/maps?q=${clinic.latitude},${clinic.longitude}&z=15&output=embed`}
-                      allowFullScreen
-                    ></iframe>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <a className="flex-1" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${clinic.name}, ${clinic.city}, ${clinic.address}`)}`}>
-                      <Button variant="outline" className="w-full">Google Maps</Button>
-                    </a>
-                    <a className="flex-1" target="_blank" rel="noopener noreferrer" href={`https://2gis.kz/search/${encodeURIComponent(`${clinic.name}, ${clinic.city}, ${clinic.address}`)}`}>
-                      <Button variant="outline" className="w-full">2GIS</Button>
-                    </a>
-                  </div>
-                )}
+
+              {/* Map Preview */}
+              {clinic.latitude != null && clinic.longitude != null && (
+                <div className="w-full h-44 bg-muted rounded-xl overflow-hidden border border-border mt-3">
+                  <iframe
+                    title={`Карта ${clinic.name}`}
+                    width="100%"
+                    height="100%"
+                    frameBorder="0"
+                    style={{ border: 0 }}
+                    src={`https://maps.google.com/maps?q=${clinic.latitude},${clinic.longitude}&z=15&output=embed`}
+                    allowFullScreen
+                  ></iframe>
+                </div>
+              )}
+
+              {/* Working Navigation Buttons */}
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <RouteDropdown
+                    clinicName={clinic.name}
+                    city={clinic.city}
+                    address={clinic.address || ""}
+                    latitude={clinic.latitude}
+                    longitude={clinic.longitude}
+                    size="md"
+                  />
+              </div>
             </div>
           </div>
         </div>
@@ -179,13 +189,13 @@ export default function ClinicDetailPage() {
                 onClick={() => setActiveTab('services')}
                 className={`flex-1 py-4 text-center font-semibold transition-colors ${activeTab === 'services' ? 'bg-white border-b-2 border-primary text-primary' : 'text-muted-foreground hover:bg-black/5'}`}
               >
-                Прайс-лист ({services.length})
+                {locale === 'en' ? 'Price List' : (locale === 'kk' ? 'Прайс-парақ' : 'Прайс-лист')} ({services.length})
               </button>
               <button
                 onClick={() => setActiveTab('doctors')}
                 className={`flex-1 py-4 text-center font-semibold transition-colors ${activeTab === 'doctors' ? 'bg-white border-b-2 border-primary text-primary' : 'text-muted-foreground hover:bg-black/5'}`}
               >
-                Врачи ({doctors.length})
+                {t('search.doctors')} ({doctors.length})
               </button>
             </div>
 
@@ -204,13 +214,13 @@ export default function ClinicDetailPage() {
                         <div className="text-right">
                           <div className="text-2xl font-bold">{priceItem.price_kzt.toLocaleString('ru-RU')} ₸</div>
                         </div>
-                        <Button size="sm">Выбрать</Button>
+                        <Button size="sm">{t('compare.choose')}</Button>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div className="p-8 text-center text-muted-foreground">
-                    Нет данных об услугах
+                    {t('search.noResults')}
                   </div>
                 )
               ) : (
@@ -232,22 +242,22 @@ export default function ClinicDetailPage() {
                               <Star className="w-3 h-3 fill-current mr-1" />
                               {doctor.rating}
                             </div>
-                            <span className="text-muted-foreground text-xs">{doctor.reviews_count} отзывов</span>
+                            <span className="text-muted-foreground text-xs">{doctor.reviews_count} {t('clinics.reviews')}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-4 mt-4 text-sm text-muted-foreground">
-                          <div>Стаж: <strong>{doctor.experience_years ?? 0} лет</strong></div>
-                          <div>Прием: <strong className="text-foreground">{(doctor.consultation_price ?? 0).toLocaleString('ru-RU')} ₸</strong></div>
+                          <div>{locale === 'en' ? 'Experience:' : (locale === 'kk' ? 'Еңбек өтілі:' : 'Стаж:')} <strong>{doctor.experience_years ?? 0} {locale === 'en' ? 'years' : (locale === 'kk' ? 'жыл' : 'лет')}</strong></div>
+                          <div>{locale === 'en' ? 'Consultation:' : (locale === 'kk' ? 'Қабылдау:' : 'Прием:')} <strong className="text-foreground">{(doctor.consultation_price ?? 0).toLocaleString('ru-RU')} ₸</strong></div>
                         </div>
                       </div>
                       <div className="sm:self-center shrink-0">
-                        <Button className="w-full sm:w-auto" onClick={() => setSelectedDoctor(doctor)}>Записаться</Button>
+                        <Button className="w-full sm:w-auto" onClick={() => setSelectedDoctor(doctor)}>{t('search.book')}</Button>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div className="p-8 text-center text-muted-foreground">
-                    Нет информации о врачах
+                    {locale === 'en' ? 'No doctors found' : (locale === 'kk' ? 'Дәрігерлер туралы ақпарат жоқ' : 'Нет информации о врачах')}
                   </div>
                 )
               )}
@@ -256,7 +266,7 @@ export default function ClinicDetailPage() {
         </div>
       </div>
       <div className="mt-8 bg-card border border-border rounded-2xl p-6 shadow-sm">
-        <h2 className="font-semibold text-lg mb-3">Оценить клинику</h2>
+        <h2 className="font-semibold text-lg mb-3">{locale === 'en' ? 'Rate this clinic' : (locale === 'kk' ? 'Клиниканы бағалау' : 'Оценить клинику')}</h2>
         <div className="flex items-center gap-1 mb-3" aria-label="Оценка от 1 до 5">
           {[1, 2, 3, 4, 5].map((value) => (
             <button key={value} type="button" onClick={() => setReviewRating(value)} className="p-1 text-amber-500" aria-label={`${value} звезд`}>
@@ -264,8 +274,8 @@ export default function ClinicDetailPage() {
             </button>
           ))}
         </div>
-        <textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} placeholder="Ваш отзыв" maxLength={2000} className="w-full min-h-20 px-3 py-2 rounded-xl border border-black/10 bg-black/5 focus:bg-white focus:ring-2 focus:ring-primary focus:outline-none text-sm" />
-        <Button size="sm" className="mt-3" disabled={!reviewRating} onClick={() => void submitClinicReview()}>Отправить отзыв</Button>
+        <textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} placeholder={locale === 'en' ? 'Your review' : (locale === 'kk' ? 'Сіздің пікіріңіз' : 'Ваш отзыв')} maxLength={2000} className="w-full min-h-20 px-3 py-2 rounded-xl border border-black/10 bg-black/5 focus:bg-white focus:ring-2 focus:ring-primary focus:outline-none text-sm" />
+        <Button size="sm" className="mt-3" disabled={!reviewRating} onClick={() => void submitClinicReview()}>{locale === 'en' ? 'Submit Review' : (locale === 'kk' ? 'Пікір жіберу' : 'Отправить отзыв')}</Button>
         {reviewStatus && <p className="text-sm text-muted-foreground mt-2">{reviewStatus}</p>}
       </div>
       <DoctorProfileModal

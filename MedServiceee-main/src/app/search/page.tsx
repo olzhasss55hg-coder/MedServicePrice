@@ -1,4 +1,7 @@
-"use client"
+"use client";
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 import { useState, useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
@@ -20,6 +23,8 @@ interface Clinic {
   rating?: number
   has_online_booking?: boolean
   has_active_promotion?: boolean
+  latitude?: number | null
+  longitude?: number | null
 }
 
 interface Service {
@@ -97,15 +102,14 @@ function SearchPageContent() {
     return () => window.clearTimeout(timer)
   }, [initialQuery, initialCity])
 
-  const fetchResults = async (q: string, c: string, minR: number|null, onB: boolean|null, sBy: string, minP: number|null, maxP: number|null, selectedSpecialty: string, selectedLanguage: string, selectedPromotion: boolean|null) => {
-    if (!q || q.length < 2) {
-      setLoading(false)
-      return
-    }
+  const fetchResults = async (q: string, c: string, minR: number | null, onB: boolean | null, sBy: string, minP: number | null, maxP: number | null, selectedSpecialty: string, selectedLanguage: string, selectedPromotion: boolean | null) => {
     setLoading(true)
     setError("")
     try {
-      let url = `${API_URL}/api/search?q=${encodeURIComponent(q)}&city=${encodeURIComponent(c)}`
+      let url = `${API_URL}/api/search?city=${encodeURIComponent(c || "Алматы")}`
+      if (q && q.trim().length > 0) {
+        url += `&q=${encodeURIComponent(q.trim())}`
+      }
       if (minR !== null) url += `&min_rating=${minR}`
       if (onB !== null) url += `&online_booking=${onB}`
       if (sBy) url += `&sort_by=${sBy}`
@@ -114,7 +118,7 @@ function SearchPageContent() {
       if (selectedSpecialty) url += `&specialty=${encodeURIComponent(selectedSpecialty)}`
       if (selectedLanguage) url += `&language=${encodeURIComponent(selectedLanguage)}`
       if (selectedPromotion !== null) url += `&has_promotion=${selectedPromotion}`
-      
+
       const res = await fetch(url)
       if (!res.ok) {
         throw new Error("Ошибка при поиске")
@@ -135,18 +139,8 @@ function SearchPageContent() {
     return () => window.clearTimeout(timer)
   }, [searchQuery, city, minRating, onlineBooking, sortBy, minPrice, maxPrice, specialty, language, hasPromotion])
 
-  useEffect(() => {
-    if (initialQuery.length < 2) return
-    const timer = window.setTimeout(() => {
-      void fetchResults(initialQuery, initialCity, null, null, "", null, null, "", "", null)
-    }, 1)
-    return () => window.clearTimeout(timer)
-  }, [initialQuery, initialCity])
-
   const handleSearch = () => {
-    if (searchQuery.trim().length >= 2) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}&city=${encodeURIComponent(city)}`)
-    }
+    router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}&city=${encodeURIComponent(city)}`)
   }
 
   const applyPriceFilter = () => {
@@ -227,8 +221,8 @@ function SearchPageContent() {
                     <option value="Алматы">Алматы</option>
                     <option value="Астана">Астана</option>
                     <option value="Шымкент">Шымкент</option>
-                    <option value="Караганда">Караганда</option>
-                    <option value="Актобе">Актобе</option>
+                    <option value="Қарағанды">Қарағанды / Караганда</option>
+                    <option value="Ақтөбе">Ақтөбе / Актобе</option>
                     <option value="Павлодар">Павлодар</option>
                   </select>
                   <svg className="w-4 h-4 text-muted-foreground absolute right-3 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -363,7 +357,7 @@ function SearchPageContent() {
               <h1 className="text-2xl font-bold text-foreground">
                 {locale === 'en' ? 'Search Results' : (locale === 'kk' ? 'Іздеу нәтижелері' : 'Результаты поиска')} {initialQuery && (locale === 'en' ? `for "${initialQuery}"` : (locale === 'kk' ? `«${initialQuery}» бойынша` : `по запросу «${initialQuery}»`))} <span className="text-muted-foreground font-normal text-lg">({filteredResults.length})</span>
               </h1>
-              
+
               {/* Sort By Select */}
               <div className="relative flex items-center bg-white border border-black/10 rounded-xl h-10 hover:border-primary/50 transition-colors shrink-0 min-w-[200px]">
                 <select
@@ -431,6 +425,9 @@ function SearchPageContent() {
                         clinicId={result.best_offer_clinic.id}
                         clinicName={result.best_offer_clinic.name}
                         address={result.best_offer_clinic.address}
+                        city={result.best_offer_clinic.city}
+                        latitude={result.best_offer_clinic.latitude}
+                        longitude={result.best_offer_clinic.longitude}
                         price={result.best_offer_price}
                         sourceUrl={result.best_offer_clinic.source_url ?? ""}
                         lastUpdatedAt={result.last_updated_at}

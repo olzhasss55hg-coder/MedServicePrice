@@ -39,9 +39,10 @@ class Clinic(Base):
     has_online_booking = Column(Boolean, default=True)
     has_active_promotion = Column(Boolean, default=False, index=True)
 
-    prices = relationship("Price", back_populates="clinic")
+    prices = relationship("Price", back_populates="clinic", cascade="all, delete-orphan")
     subscriptions = relationship("UserSubscription", back_populates="clinic")
-    doctors = relationship("Doctor", back_populates="clinic")
+    doctors = relationship("Doctor", back_populates="clinic", cascade="all, delete-orphan")
+    reviews = relationship("Review", back_populates="clinic")
 
 class Doctor(Base):
     __tablename__ = "doctors"
@@ -50,7 +51,10 @@ class Doctor(Base):
     clinic_id = Column(String, ForeignKey("clinics.id"), index=True)
     first_name = Column(String)
     last_name = Column(String)
-    specialty = Column(String)
+    specialty = Column(String, index=True)
+    gender = Column(String, default="m") # "m", "f"
+    category = Column(String, default="Высшая категория", nullable=True)
+    is_pediatric = Column(Boolean, default=False, nullable=False)
     experience_years = Column(Integer)
     rating = Column(Float, default=0.0)
     reviews_count = Column(Integer, default=0)
@@ -60,6 +64,7 @@ class Doctor(Base):
     description = Column(String, nullable=True)
 
     clinic = relationship("Clinic", back_populates="doctors")
+    reviews = relationship("Review", back_populates="doctor")
 
 class Service(Base):
     __tablename__ = "services"
@@ -70,7 +75,7 @@ class Service(Base):
     category = Column(SQLAlchemyEnum(CategoryEnum), index=True)
     is_matched = Column(Boolean, default=True)
 
-    prices = relationship("Price", back_populates="service")
+    prices = relationship("Price", back_populates="service", cascade="all, delete-orphan")
     subscriptions = relationship("UserSubscription", back_populates="service")
 
 class Price(Base):
@@ -88,7 +93,7 @@ class Price(Base):
 
     clinic = relationship("Clinic", back_populates="prices")
     service = relationship("Service", back_populates="prices")
-    history = relationship("PriceHistory", back_populates="price_parent")
+    history = relationship("PriceHistory", back_populates="price_parent", cascade="all, delete-orphan")
 
 class PriceHistory(Base):
     __tablename__ = "price_history"
@@ -108,12 +113,13 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     full_name = Column(String, nullable=True)
-    plan = Column(String, default="free", nullable=False, index=True)
+    plan = Column(String, default="free", nullable=False, index=True) # "free", "pro", "premium"
     ai_requests_used = Column(Integer, default=0, nullable=False)
     ai_usage_period_started_at = Column(DateTime, default=utc_now, nullable=True)
     
     subscriptions = relationship("UserSubscription", back_populates="user")
     bookings = relationship("Booking", back_populates="patient")
+    reviews = relationship("Review", back_populates="user")
 
     @property
     def priority_booking(self):
@@ -129,7 +135,7 @@ class UserSubscription(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     user_id = Column(String, ForeignKey("users.id"))
     service_id = Column(String, ForeignKey("services.id"))
-    clinic_id = Column(String, ForeignKey("clinics.id"), nullable=True) # Optional, can subscribe to any clinic for this service
+    clinic_id = Column(String, ForeignKey("clinics.id"), nullable=True)
     created_at = Column(DateTime, default=utc_now)
     
     user = relationship("User", back_populates="subscriptions")
@@ -151,7 +157,7 @@ class Booking(Base):
     discount_amount = Column(Numeric(10, 2), default=0)
     total_amount = Column(Numeric(10, 2), nullable=True)
     priority_booking = Column(Boolean, default=False, nullable=False)
-    status = Column(String, default="new", nullable=False)
+    status = Column(String, default="new", nullable=False) # "new", "confirmed", "completed", "cancelled"
     created_at = Column(DateTime, default=utc_now)
 
     patient = relationship("User", back_populates="bookings")
@@ -166,13 +172,12 @@ class Booking(Base):
     def clinic_name(self):
         return self.clinic.name if self.clinic else None
 
-
 class PromoCode(Base):
     __tablename__ = "promo_codes"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     code = Column(String, unique=True, index=True, nullable=False)
-    discount_type = Column(String, nullable=False, default="percent")
+    discount_type = Column(String, nullable=False, default="percent") # "percent", "fixed"
     discount_value = Column(Numeric(10, 2), nullable=False)
     usage_limit = Column(Integer, nullable=True)
     used_count = Column(Integer, default=0, nullable=False)
@@ -183,7 +188,6 @@ class PromoCode(Base):
 
     clinic = relationship("Clinic")
 
-
 class Review(Base):
     __tablename__ = "reviews"
 
@@ -191,14 +195,17 @@ class Review(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     doctor_id = Column(String, ForeignKey("doctors.id"), nullable=True, index=True)
     clinic_id = Column(String, ForeignKey("clinics.id"), nullable=True, index=True)
-    rating = Column(Integer, nullable=False)
+    booking_id = Column(String, ForeignKey("bookings.id"), nullable=True, index=True)
+    patient_name = Column(String, nullable=True)
+    rating = Column(Integer, nullable=False) # 1-5
     comment = Column(Text, nullable=True)
+    is_verified = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
-    user = relationship("User")
-    doctor = relationship("Doctor")
-    clinic = relationship("Clinic")
-
+    user = relationship("User", back_populates="reviews")
+    doctor = relationship("Doctor", back_populates="reviews")
+    clinic = relationship("Clinic", back_populates="reviews")
+    booking = relationship("Booking")
 
 class AIUsage(Base):
     __tablename__ = "ai_usage"

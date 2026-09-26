@@ -59,3 +59,28 @@ body {
   background-image: linear-gradient(rgba(15, 111, 255, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 111, 255, 0.025) 1px, transparent 1px);
   background-size: 32px 32px;
 }
+
+
+/* Leaflet map tile rendering fixes (Prevents Tailwind from breaking/distorting map tiles) */
+.leaflet-pane img,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container img,
+.leaflet-container img {
+  max-width: none !important;
+  max-height: none !important;
+  box-sizing: content-box !important;
+}
+
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  font-family: inherit;
+  z-index: 10;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 16px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}

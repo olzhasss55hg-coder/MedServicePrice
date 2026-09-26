@@ -30,31 +30,6 @@ class ClinicBase(BaseModel):
     has_online_booking: bool = True
     has_active_promotion: bool = False
 
-class BookingCreate(BaseModel):
-    clinic_id: str
-    doctor_id: Optional[str] = None
-    name: str
-    phone: str
-    preferred_time: Optional[str] = None
-    appointment_at: Optional[datetime] = None
-    promo_code: Optional[str] = Field(default=None, max_length=32)
-
-class BookingResponse(BookingCreate):
-    id: str
-    status: str
-    discount_amount: float = 0
-    total_amount: Optional[float] = None
-    priority_booking: bool = False
-    doctor_name: Optional[str] = None
-    clinic_name: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class PriceAlertCreate(BaseModel):
-    service_id: str
-    clinic_id: Optional[str] = None
-    target_price_kzt: Optional[float] = None
-
 class ClinicCreate(ClinicBase):
     pass
 
@@ -69,6 +44,9 @@ class DoctorBase(BaseModel):
     first_name: str
     last_name: str
     specialty: str
+    gender: Optional[str] = "m"
+    category: Optional[str] = "Высшая категория"
+    is_pediatric: Optional[bool] = False
     experience_years: int
     rating: float = 0.0
     reviews_count: int = 0
@@ -197,17 +175,42 @@ class ClinicDetailResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
-
 class DoctorSlot(BaseModel):
     starts_at: datetime
     available: bool = True
 
+# Booking Schemas
+class BookingCreate(BaseModel):
+    clinic_id: str
+    doctor_id: Optional[str] = None
+    name: str
+    phone: str
+    preferred_time: Optional[str] = None
+    appointment_at: Optional[datetime] = None
+    promo_code: Optional[str] = Field(default=None, max_length=32)
 
+class BookingResponse(BookingCreate):
+    id: str
+    status: str
+    discount_amount: float = 0
+    total_amount: Optional[float] = None
+    priority_booking: bool = False
+    doctor_name: Optional[str] = None
+    clinic_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PriceAlertCreate(BaseModel):
+    service_id: str
+    clinic_id: Optional[str] = None
+    target_price_kzt: Optional[float] = None
+
+# Promo Code Schemas
 class PromoCodeValidate(BaseModel):
     code: str = Field(min_length=2, max_length=32)
     amount: float = Field(ge=0)
     clinic_id: Optional[str] = None
-
 
 class PromoCodeResponse(BaseModel):
     code: str
@@ -217,30 +220,61 @@ class PromoCodeResponse(BaseModel):
     total_amount: float
     expires_at: Optional[datetime] = None
 
-
 class PlanResponse(BaseModel):
     plan: str
     ai_requests_used: int
     ai_limit: Optional[int]
     priority_booking: bool
 
-
 class PlanUpdate(BaseModel):
     plan: str = Field(pattern="^(free|pro|premium)$")
 
-
+# Reviews
 class ReviewCreate(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: Optional[str] = Field(default=None, max_length=2000)
     doctor_id: Optional[str] = None
     clinic_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    booking_id: Optional[str] = None
 
-
-class ReviewResponse(ReviewCreate):
+class ReviewResponse(BaseModel):
     id: str
+    rating: int
+    comment: Optional[str] = None
+    doctor_id: Optional[str] = None
+    clinic_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    is_verified: bool = True
     user_id: Optional[str] = None
     created_at: datetime
     average_rating: Optional[float] = None
     reviews_count: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+# Symptom Checker
+class SymptomCheckRequest(BaseModel):
+    symptoms_text: Optional[str] = None
+    selected_symptoms: List[str] = []
+    language: Optional[str] = "ru" # "ru" or "kz"
+    city: Optional[str] = "Алматы"
+
+class RecommendedDoctor(BaseModel):
+    id: str
+    name: str
+    specialty: str
+    clinic_id: str
+    clinic_name: Optional[str] = None
+    price: float
+    rating: float
+    photo_url: Optional[str] = None
+    city: Optional[str] = None
+
+class SymptomCheckResponse(BaseModel):
+    potential_conditions: List[str]
+    specialty: str
+    recommended_examinations: List[str]
+    disclaimer: str
+    recommended_doctors: List[RecommendedDoctor] = []
+    ai_analysis: str

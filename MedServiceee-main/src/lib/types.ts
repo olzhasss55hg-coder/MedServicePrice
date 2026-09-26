@@ -5,6 +5,9 @@ export interface Doctor {
   last_name: string;
   name?: string;
   specialty: string;
+  gender?: "m" | "f" | string;
+  category?: string;
+  is_pediatric?: boolean;
   experience_years?: number;
   experience?: number;
   rating?: number;
@@ -15,6 +18,7 @@ export interface Doctor {
   photo?: string | null;
   languages?: string[];
   description?: string | null;
+  clinic?: Clinic;
 }
 
 export interface Clinic {
@@ -33,6 +37,7 @@ export interface Clinic {
   reviews_count?: number | null;
   has_online_booking?: boolean;
   has_active_promotion?: boolean;
+  doctors?: Doctor[];
 }
 
 export interface Service {
@@ -66,4 +71,78 @@ export interface ClinicDetail {
   clinic: Clinic;
   services: Price[];
   doctors: Doctor[];
+}
+
+export interface DoctorSlot {
+  starts_at: string;
+  available: boolean;
+}
+
+export interface Booking {
+  id: string;
+  clinic_id: string;
+  doctor_id?: string | null;
+  name: string;
+  phone: string;
+  preferred_time?: string | null;
+  appointment_at?: string | null;
+  promo_code?: string | null;
+  discount_amount: number;
+  total_amount?: number | null;
+  priority_booking: boolean;
+  status: string;
+  doctor_name?: string | null;
+  clinic_name?: string | null;
+  created_at?: string | null;
+}
+
+export interface Review {
+  id: string;
+  rating: number;
+  comment?: string | null;
+  doctor_id?: string | null;
+  clinic_id?: string | null;
+  patient_name?: string | null;
+  is_verified?: boolean;
+  user_id?: string | null;
+  created_at: string;
+  average_rating?: number;
+  reviews_count?: number;
+}
+
+export interface PromoCodeResponse {
+  code: string;
+  discount_type: "percent" | "fixed" | string;
+  discount_value: number;
+  discount_amount: number;
+  total_amount: number;
+  expires_at?: string | null;
+}
+
+export interface UserPlan {
+  plan: "free" | "pro" | "premium";
+  ai_requests_used: number;
+  ai_limit?: number | null;
+  priority_booking: boolean;
+}
+
+export interface RecommendedDoctor {
+  id: string;
+  name: string;
+  specialty: string;
+  clinic_id: string;
+  clinic_name?: string | null;
+  price: number;
+  rating: number;
+  photo_url?: string | null;
+  city?: string | null;
+}
+
+export interface SymptomCheckResponse {
+  potential_conditions: string[];
+  specialty: string;
+  recommended_examinations: string[];
+  disclaimer: string;
+  recommended_doctors: RecommendedDoctor[];
+  ai_analysis: string;
 }

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 from contextlib import asynccontextmanager
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -18,6 +18,7 @@ from database import engine, get_db
 import meilisearch
 from scheduler_tasks import start_scheduler, stop_scheduler
 import chat_ai
+import notifications
 from migrations import ensure_schema
 from pydantic import BaseModel, Field
 from logger import api_logger
@@ -25,6 +26,10 @@ from logger import api_logger
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     language: Optional[str] = Field(default=None, pattern="^(ru|kz)$")
+
+class CheckoutRequest(BaseModel):
+    plan: str = Field(pattern="^(pro|premium)$")
+    payment_method: Optional[str] = "card"
 
 MEILI_URL = os.getenv("MEILI_URL", "http://localhost:7700")
 MEILI_MASTER_KEY = os.getenv("MEILI_MASTER_KEY", "")
@@ -37,8 +42,8 @@ ALLOWED_ORIGINS = [
 meili_client = meilisearch.Client(MEILI_URL, MEILI_MASTER_KEY)
 
 
-def resolve_search_category(query: str) -> Optional[models.CategoryEnum]:
-    """Map generic user queries like 'Анализы' to the service category used in DB."""
+def resolve_search_category(query: Optional[str]) -> Optional[models.CategoryEnum]:
+    """Map generic user queries to the service category used in DB."""
     if not query:
         return None
 
@@ -46,17 +51,73 @@ def resolve_search_category(query: str) -> Optional[models.CategoryEnum]:
     if not normalized:
         return None
 
-    if any(token in normalized for token in ["анализ", "lab", "blood", "тест", "оак"]):
+    if any(token in normalized for token in [
+        "анализ", "лаборатор", "lab", "blood", "тест", "оак", "оам", "қан", "талдау", "биохими", "пцр", "гормон", "ферритин", "витамин"
+    ]):
         return models.CategoryEnum.laboratory
-    if any(token in normalized for token in ["прием врача", "приём врача", "врач", "doctor", "consultation"]):
+    if any(token in normalized for token in [
+        "прием", "приём", "врач", "doctor", "consultation", "дәрігер", "қабылдау",
+        "терапевт", "педиатр", "кардиолог", "невропатолог", "эндокринолог", "гинеколог", "уролог", "офтальмолог", "дерматолог", "гастроэнтеролог", "хирург"
+    ]):
         return models.CategoryEnum.doctor_appointment
-    if any(token in normalized for token in ["узи", "ультразвук", "mri", "мрт", "кт", "рентген", "диагностика", "scanner"]):
+    if any(token in normalized for token in [
+        "узи", "ультразвук", "mri", "мрт", "кт", "рентген", "диагностика", "scanner", "рентгенография", "экг", "эхокг", "холтер", "ээг", "удз", "смад", "спирометри", "лучевая", "функциональная"
+    ]):
         return models.CategoryEnum.diagnostics
-    if any(token in normalized for token in ["процедура", "процед", "procedure"]):
+    if any(token in normalized for token in [
+        "процедура", "процед", "procedure", "екпе", "укол", "капельница", "массаж", "фгдс", "колоноскопия", "блокада", "перевязка", "инъекци", "инфузи"
+    ]):
         return models.CategoryEnum.procedure
     return None
 
-# Keep the existing data and add only missing schema pieces.
+CITY_ALIASES = {
+    "astana": "Астана",
+    "астана": "Астана",
+    "nur-sultan": "Астана",
+    "нур-султан": "Астана",
+    "almaty": "Алматы",
+    "алматы": "Алматы",
+    "алмата": "Алматы",
+    "pavlodar": "Павлодар",
+    "павлодар": "Павлодар",
+    "shymkent": "Шымкент",
+    "шымкент": "Шымкент",
+    "чимкент": "Шымкент",
+    "karaganda": "Қарағанды",
+    "караганда": "Қарағанды",
+    "қарағанды": "Қарағанды",
+    "qaragandy": "Қарағанды",
+    "aktobe": "Ақтөбе",
+    "актобе": "Ақтөбе",
+    "ақтөбе": "Ақтөбе",
+}
+
+def normalize_city_name(city: Optional[str]) -> Optional[str]:
+    if not city:
+        return None
+    raw = city.lower().strip()
+    for prefix in ["г.", "г ", "город ", "қ.", "қ ", "қаласы", "облысы", "обл."]:
+        raw = raw.replace(prefix, "")
+    raw = raw.strip(" ,.-")
+    for key, canonical in CITY_ALIASES.items():
+        if key == raw or key in raw or raw in key:
+            return canonical
+    return raw.capitalize()
+
+def is_city_match(clinic_city: Optional[str], search_city: Optional[str]) -> bool:
+    if not search_city or not search_city.strip():
+        return True
+    if not clinic_city:
+        return False
+    norm_search = normalize_city_name(search_city)
+    norm_clinic = normalize_city_name(clinic_city)
+    if norm_search and norm_clinic and norm_search.lower() == norm_clinic.lower():
+        return True
+    c_lower = clinic_city.lower().replace("ё", "е")
+    s_lower = search_city.lower().replace("ё", "е")
+    norm_s_lower = (norm_search or "").lower()
+    return (bool(norm_s_lower) and norm_s_lower in c_lower) or c_lower in s_lower or s_lower in c_lower
+
 ensure_schema()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -93,8 +154,7 @@ def get_optional_current_user(
     access_token: Optional[str] = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
-    """Return the logged-in user when available, otherwise keep public flows public."""
-
+    """Return logged-in user or None without raising 401."""
     if not token and not access_token:
         return None
     try:
@@ -182,14 +242,17 @@ def logout(response: Response):
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
-# --- Search API ---
+# --- Search API with Combined Advanced Filters ---
 @app.get("/api/search", response_model=List[schemas.UnifiedSearchResult])
 def search_services(
-    q: str = Query(..., min_length=2),
+    q: Optional[str] = Query(None),
+    category: Optional[str] = None,
     city: Optional[str] = None,
     district: Optional[str] = None,
     specialty: Optional[str] = None,
     language: Optional[str] = None,
+    gender: Optional[str] = None,
+    is_pediatric: Optional[bool] = None,
     has_promotion: Optional[bool] = None,
     min_rating: Optional[float] = None,
     online_booking: Optional[bool] = None,
@@ -198,92 +261,111 @@ def search_services(
     sort_by: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    resolved_category = resolve_search_category(q)
-    try:
-        search_res = meili_client.index('services').search(q, {'limit': 20})
-        hits = search_res.get('hits', [])
-        if not hits:
-            raise RuntimeError("Meilisearch returned no hits")
-    except Exception as exc:
-        api_logger.warning("Meilisearch unavailable, using database search: %s", exc)
-        service_query = db.query(models.Service).filter(
-            or_(
-                models.Service.name_raw.ilike(f"%{q}%"),
-                models.Service.name_norm.ilike(f"%{q}%"),
-            )
-        )
-        if resolved_category is not None:
-            service_query = service_query.filter(models.Service.category == resolved_category)
-        matching_services = service_query.limit(20).all()
-        hits = [{"id": service.id} for service in matching_services]
+    city_clean = (city or "").strip()
+    city_clinic_ids = None
+    if city_clean:
+        all_clinics_list = db.query(models.Clinic.id, models.Clinic.city).all()
+        matched = [c[0] for c in all_clinics_list if is_city_match(c[1], city_clean)]
+        city_clinic_ids = set(matched)
+        if not city_clinic_ids:
+            return []
 
-        if not hits and resolved_category is not None:
-            matching_services = db.query(models.Service).filter(models.Service.category == resolved_category).limit(20).all()
-            hits = [{"id": service.id} for service in matching_services]
-        
+    query_str = (q or "").strip()
+    q_norm = query_str.lower().replace("ё", "е").strip()
+    category_from_query = resolve_search_category(query_str) if query_str else None
+    explicit_category = resolve_search_category(category) if category else None
+    target_category = explicit_category or category_from_query
+
+    is_broad_category_query = q_norm in [
+        "прием врача", "прием", "приём", "врач", "врачи", "дәрігер", "қабылдау",
+        "анализ", "анализы", "лаборатория", "қан", "тест", "талдау",
+        "узи", "мрт", "кт", "рентген", "диагностика", "экг", "удз",
+        "процедура", "процедуры", "екпе", "укол", "капельница"
+    ]
+
+    services = []
+    if is_broad_category_query and target_category is not None:
+        services = db.query(models.Service).filter(models.Service.category == target_category).limit(100).all()
+    elif query_str:
+        filters = [
+            func.lower(models.Service.name_raw).like(f"%{q_norm}%"),
+            models.Service.name_norm.like(f"%{q_norm}%"),
+        ]
+        tokens = [t.lower().replace("ё", "е") for t in query_str.split() if len(t) > 1]
+        for token in tokens:
+            filters.append(func.lower(models.Service.name_raw).like(f"%{token}%"))
+            filters.append(models.Service.name_norm.like(f"%{token}%"))
+            if len(token) > 4:
+                filters.append(models.Service.name_norm.like(f"%{token[:-1]}%"))
+
+        service_query = db.query(models.Service).filter(or_(*filters))
+        if target_category is not None:
+            service_query = service_query.filter(models.Service.category == target_category)
+        services = service_query.limit(100).all()
+
+        if len(services) < 10 and target_category is not None:
+            cat_services = db.query(models.Service).filter(models.Service.category == target_category).limit(100).all()
+            seen_ids = {s.id for s in services}
+            for cs in cat_services:
+                if cs.id not in seen_ids:
+                    services.append(cs)
+                    seen_ids.add(cs.id)
+    elif target_category is not None:
+        services = db.query(models.Service).filter(models.Service.category == target_category).limit(100).all()
+    else:
+        services = db.query(models.Service).limit(100).all()
+
     results = []
-    thirty_days_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
-    
-    for hit in hits:
-        service_id = hit['id']
-        service = db.query(models.Service).filter(models.Service.id == service_id).first()
-        if not service:
-            continue
-            
-        # Join with Clinic to apply clinic-level filters in DB query if possible, or filter in Python
-        prices = db.query(models.Price).filter(
-            models.Price.service_id == service_id,
+
+    for service in services:
+        price_query = db.query(models.Price).filter(
+            models.Price.service_id == service.id,
             models.Price.is_active.is_(True),
-            models.Price.parsed_at.is_not(None),
-            models.Price.parsed_at >= thirty_days_ago
-        ).all()
-        # Fallback to all available prices if no recent ones exist
-        if not prices:
-            prices = db.query(models.Price).filter(
-                models.Price.service_id == service_id,
-                models.Price.is_active.is_(True),
-                models.Price.parsed_at.is_not(None),
-            ).all()
-        
+        )
+        if city_clinic_ids is not None:
+            price_query = price_query.filter(models.Price.clinic_id.in_(city_clinic_ids))
+        prices = price_query.all()
+
         filtered_prices = []
         for p in prices:
-            # Apply city filter
-            if city and p.clinic.city.casefold() != city.casefold():
+            if not p.clinic:
                 continue
-            if district and (not p.clinic.district or p.clinic.district.casefold() != district.casefold()):
+            if district and (not p.clinic.district or district.lower() not in p.clinic.district.lower()):
                 continue
-            # Apply rating filter
             if min_rating and (p.clinic.rating or 0) < min_rating:
                 continue
-            # Apply online booking filter
             if online_booking is not None and p.clinic.has_online_booking != online_booking:
                 continue
             if has_promotion is not None and bool(p.clinic.has_active_promotion) != has_promotion:
                 continue
+            
             clinic_doctors = p.clinic.doctors or []
-            if specialty and not any(specialty.casefold() in (doctor.specialty or "").casefold() for doctor in clinic_doctors):
+            if specialty and not any(specialty.casefold() in (doc.specialty or "").casefold() for doc in clinic_doctors):
                 continue
-            if language and not any(language.casefold() in (doctor.languages or "").casefold() for doctor in clinic_doctors):
+            if language and not any(language.casefold() in (doc.languages or "").casefold() for doc in clinic_doctors):
                 continue
+            if gender and not any(doc.gender == gender for doc in clinic_doctors):
+                continue
+            if is_pediatric is not None and not any(doc.is_pediatric == is_pediatric for doc in clinic_doctors):
+                continue
+
             if min_price_filter is not None and float(p.price_kzt) < min_price_filter:
                 continue
             if max_price_filter is not None and float(p.price_kzt) > max_price_filter:
                 continue
             filtered_prices.append(p)
-            
+
         if not filtered_prices:
             continue
-            
-        prices_list = [p.price_kzt for p in filtered_prices if p.price_kzt is not None]
+
+        prices_list = [float(p.price_kzt) for p in filtered_prices if p.price_kzt is not None]
         if not prices_list:
             continue
-            
+
         min_service_price = min(prices_list)
         avg_price = sum(prices_list) / len(prices_list)
-        
-        priced_offers = [p for p in filtered_prices if p.price_kzt is not None]
-        best_price_obj = min(priced_offers, key=lambda p: p.price_kzt)
-        
+        best_price_obj = min(filtered_prices, key=lambda p: float(p.price_kzt))
+
         results.append(schemas.UnifiedSearchResult(
             service=service,
             avg_price=float(avg_price),
@@ -293,33 +375,23 @@ def search_services(
             best_offer_price=float(best_price_obj.price_kzt),
             last_updated_at=best_price_obj.parsed_at
         ))
-        
-    # Sorting logic
+
     if sort_by == 'price_asc':
         results.sort(key=lambda x: x.min_price)
     elif sort_by == 'price_desc':
         results.sort(key=lambda x: x.min_price, reverse=True)
+    elif sort_by == 'rating_desc':
+        results.sort(key=lambda x: (x.best_offer_clinic.rating if x.best_offer_clinic else 0), reverse=True)
     elif sort_by == 'date_desc':
         results.sort(key=lambda x: x.last_updated_at or datetime.min, reverse=True)
-        
+
     return results
 
-@app.post("/api/admin/trigger-parser", dependencies=[Depends(require_admin_key)])
-def trigger_parser():
-    import threading
-    from scheduler_tasks import run_parsers_and_index
-    # Run in background to not block the API
-    t = threading.Thread(target=run_parsers_and_index)
-    t.start()
-    return {"message": "Parsers started in background."}
-
-
+# --- AI Assistant & Symptom Checker ---
 FREE_AI_LIMIT = 20
 
-
 def consume_ai_quota(user: Optional[models.User], session_key: str, db: Session) -> Optional[int]:
-    """Atomically account for a chat request and return the remaining quota."""
-
+    """Atomically account for chat requests and return remaining quota."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if user and user.plan in {"pro", "premium"}:
         return None
@@ -333,7 +405,7 @@ def consume_ai_quota(user: Optional[models.User], session_key: str, db: Session)
             raise HTTPException(
                 status_code=429,
                 detail={
-                    "message": "Лимит бесплатного AI-доступа исчерпан",
+                    "message": "Лимит бесплатного AI-доступа (20 запросов) исчерпан. Перейдите на Pro/Premium для безлимитного доступа.",
                     "upgrade_required": True,
                     "plan": user.plan,
                     "limit": FREE_AI_LIMIT,
@@ -356,7 +428,7 @@ def consume_ai_quota(user: Optional[models.User], session_key: str, db: Session)
         raise HTTPException(
             status_code=429,
             detail={
-                "message": "Лимит бесплатного AI-доступа исчерпан",
+                "message": "Лимит бесплатного AI-доступа (20 запросов) исчерпан. Перейдите на Pro/Premium для безлимитного доступа.",
                 "upgrade_required": True,
                 "plan": "free",
                 "limit": FREE_AI_LIMIT,
@@ -365,7 +437,6 @@ def consume_ai_quota(user: Optional[models.User], session_key: str, db: Session)
     usage.requests_used += 1
     db.commit()
     return FREE_AI_LIMIT - usage.requests_used
-
 
 @app.post("/api/chat")
 def chat_with_ai(
@@ -376,7 +447,7 @@ def chat_with_ai(
     current_user: Optional[models.User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    """Process a user message through the AI chat assistant."""
+    """Process user message through multilingual AI assistant."""
     try:
         language = req.language or chat_ai.detect_language(req.message)
         session_key = x_ai_session or f"anonymous:{request.client.host if request.client else 'unknown'}"
@@ -386,11 +457,6 @@ def chat_with_ai(
 
         reply = chat_ai.generate_ai_response(req.message, db, language=language)
         triage = chat_ai.analyze_symptoms(req.message, language=language)
-        if triage:
-            if language == "kz":
-                reply = f"{reply}\n\nБолжамды себептер: {', '.join(triage['possible_causes'])}.\nАлғашқы тексерулер: {', '.join(triage['recommended_examinations'])}.\n\n⚠️ {triage['disclaimer']}"
-            else:
-                reply = f"{reply}\n\nВозможные причины: {', '.join(triage['possible_causes'])}.\nПервичные обследования: {', '.join(triage['recommended_examinations'])}.\n\n⚠️ {triage['disclaimer']}"
         recommended_doctors = []
         if triage:
             city = chat_ai.extract_city(req.message)
@@ -420,41 +486,143 @@ def chat_with_ai(
         api_logger.error("Chat API Error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="AI Error")
 
-# --- Clinics & Services API ---
+@app.post("/api/ai/symptom-checker", response_model=schemas.SymptomCheckResponse)
+def check_symptoms(
+    payload: schemas.SymptomCheckRequest,
+    db: Session = Depends(get_db)
+):
+    """AI Medical Symptom Checker endpoint with triage & doctor recommendation."""
+    result = chat_ai.analyze_symptoms_structured(
+        symptoms_text=payload.symptoms_text,
+        selected_symptoms=payload.selected_symptoms,
+        language=payload.language or "ru",
+        city=payload.city or "Алматы",
+        db=db,
+    )
+    return result
+
+# --- Clinics & Doctors API ---
 @app.get("/api/clinics", response_model=List[schemas.Clinic])
 def read_clinics(
     city: Optional[str] = None,
     district: Optional[str] = None,
+    category: Optional[str] = None,
     q: Optional[str] = None,
+    specialty: Optional[str] = None,
     min_rating: Optional[float] = Query(None, ge=0, le=5),
+    min_price: Optional[float] = Query(None, ge=0),
+    max_price: Optional[float] = Query(None, ge=0),
     online_booking: Optional[bool] = None,
     has_promotion: Optional[bool] = None,
     skip: int = 0,
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(models.Clinic)
-    if city:
-        query = query.filter(models.Clinic.city.ilike(city.strip()))
-    if district:
-        query = query.filter(models.Clinic.district.ilike(district.strip()))
-    if q:
-        pattern = f"%{q.strip()}%"
-        query = query.filter(or_(models.Clinic.name.ilike(pattern), models.Clinic.address.ilike(pattern)))
+    all_clinics = db.query(models.Clinic).all()
+    if city and city.strip():
+        all_clinics = [c for c in all_clinics if is_city_match(c.city, city)]
+    if district and district.strip():
+        dist = district.strip().lower()
+        all_clinics = [c for c in all_clinics if c.district and dist in c.district.lower()]
+    if q and q.strip():
+        pattern = q.strip().lower()
+        all_clinics = [c for c in all_clinics if pattern in c.name.lower() or pattern in (c.address or "").lower()]
+    if specialty and specialty.strip():
+        spec_low = specialty.strip().lower()
+        all_clinics = [c for c in all_clinics if any(spec_low in (d.specialty or "").lower() for d in (c.doctors or []))]
     if min_rating is not None:
-        query = query.filter(models.Clinic.rating >= min_rating)
+        all_clinics = [c for c in all_clinics if (c.rating or 0) >= min_rating]
     if online_booking is not None:
-        query = query.filter(models.Clinic.has_online_booking == online_booking)
+        all_clinics = [c for c in all_clinics if c.has_online_booking == online_booking]
     if has_promotion is not None:
-        query = query.filter(models.Clinic.has_active_promotion == has_promotion)
-    return query.offset(skip).limit(limit).all()
+        all_clinics = [c for c in all_clinics if c.has_active_promotion == has_promotion]
 
+    resolved_cat = resolve_search_category(category) if category else None
+    if resolved_cat or min_price is not None or max_price is not None:
+        price_query = db.query(models.Price.clinic_id).join(models.Service).filter(models.Price.is_active.is_(True))
+        if resolved_cat:
+            price_query = price_query.filter(models.Service.category == resolved_cat)
+        if min_price is not None:
+            price_query = price_query.filter(models.Price.price_kzt >= min_price)
+        if max_price is not None:
+            price_query = price_query.filter(models.Price.price_kzt <= max_price)
+        
+        matching_clinic_ids = set([r[0] for r in price_query.distinct().all()])
+
+        if resolved_cat == models.CategoryEnum.doctor_appointment or resolved_cat is None:
+            doc_query = db.query(models.Doctor.clinic_id)
+            if min_price is not None:
+                doc_query = doc_query.filter(models.Doctor.consultation_price >= min_price)
+            if max_price is not None:
+                doc_query = doc_query.filter(models.Doctor.consultation_price <= max_price)
+            doc_clinic_ids = [r[0] for r in doc_query.distinct().all()]
+            matching_clinic_ids = matching_clinic_ids.union(doc_clinic_ids)
+
+        all_clinics = [c for c in all_clinics if c.id in matching_clinic_ids]
+
+    return all_clinics[skip : skip + limit]
+
+@app.get("/api/clinics/bounds")
+def read_clinics_in_bounds(
+    min_lat: float = Query(..., ge=-90, le=90),
+    max_lat: float = Query(..., ge=-90, le=90),
+    min_lng: float = Query(..., ge=-180, le=180),
+    max_lng: float = Query(..., ge=-180, le=180),
+    city: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieve clinics within map bounds with doctors summary."""
+    clinics = db.query(models.Clinic).filter(
+        models.Clinic.latitude >= min_lat,
+        models.Clinic.latitude <= max_lat,
+        models.Clinic.longitude >= min_lng,
+        models.Clinic.longitude <= max_lng,
+    ).all()
+    if city and city.strip():
+        clinics = [c for c in clinics if is_city_match(c.city, city)]
+    clinics = clinics[:100]
+    
+    result = []
+    for c in clinics:
+        result.append({
+            "id": c.id,
+            "name": c.name,
+            "city": c.city,
+            "address": c.address,
+            "district": c.district,
+            "phone": c.phone,
+            "working_hours": c.working_hours,
+            "latitude": c.latitude,
+            "longitude": c.longitude,
+            "rating": c.rating,
+            "reviews_count": c.reviews_count,
+            "photo_url": c.photo_url,
+            "has_online_booking": c.has_online_booking,
+            "has_active_promotion": c.has_active_promotion,
+            "doctors_count": len(c.doctors or []),
+            "doctors": [
+                {
+                    "id": d.id,
+                    "name": f"{d.first_name} {d.last_name}",
+                    "specialty": d.specialty,
+                    "price": float(d.consultation_price or 0),
+                    "rating": d.rating,
+                    "photo_url": d.photo_url,
+                }
+                for d in (c.doctors or [])[:3]
+            ]
+        })
+    return result
 
 @app.get("/api/doctors", response_model=List[schemas.Doctor])
 def read_doctors(
     specialty: Optional[str] = None,
     city: Optional[str] = None,
+    district: Optional[str] = None,
     language: Optional[str] = None,
+    gender: Optional[str] = None,
+    is_pediatric: Optional[bool] = None,
+    min_experience: Optional[int] = None,
     min_rating: Optional[float] = Query(None, ge=0, le=5),
     min_price: Optional[float] = Query(None, ge=0),
     max_price: Optional[float] = Query(None, ge=0),
@@ -463,22 +631,35 @@ def read_doctors(
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(models.Doctor).join(models.Clinic)
-    if specialty:
-        query = query.filter(models.Doctor.specialty.ilike(f"%{specialty.strip()}%"))
-    if city:
-        query = query.filter(models.Clinic.city.ilike(city.strip()))
-    if language:
-        query = query.filter(models.Doctor.languages.ilike(f"%{language.strip()}%"))
+    all_docs = db.query(models.Doctor).join(models.Clinic).all()
+    if city and city.strip():
+        all_docs = [d for d in all_docs if is_city_match(d.clinic.city, city)]
+    if specialty and specialty.strip():
+        sp = specialty.strip().lower()
+        all_docs = [d for d in all_docs if sp in (d.specialty or "").lower()]
+    if district and district.strip():
+        dist = district.strip().lower()
+        all_docs = [d for d in all_docs if d.clinic.district and dist in d.clinic.district.lower()]
+    if language and language.strip():
+        lang = language.strip().lower()
+        all_docs = [d for d in all_docs if lang in (d.languages or "").lower()]
+    if gender:
+        all_docs = [d for d in all_docs if d.gender == gender]
+    if is_pediatric is not None:
+        all_docs = [d for d in all_docs if d.is_pediatric == is_pediatric]
+    if min_experience is not None:
+        all_docs = [d for d in all_docs if (d.experience_years or 0) >= min_experience]
     if min_rating is not None:
-        query = query.filter(models.Doctor.rating >= min_rating)
+        all_docs = [d for d in all_docs if (d.rating or 0) >= min_rating]
     if min_price is not None:
-        query = query.filter(models.Doctor.consultation_price >= min_price)
+        all_docs = [d for d in all_docs if (d.consultation_price or 0) >= min_price]
     if max_price is not None:
-        query = query.filter(models.Doctor.consultation_price <= max_price)
+        all_docs = [d for d in all_docs if (d.consultation_price or 0) <= max_price]
     if has_promotion is not None:
-        query = query.filter(models.Clinic.has_active_promotion == has_promotion)
-    return query.order_by(models.Doctor.rating.desc()).offset(skip).limit(limit).all()
+        all_docs = [d for d in all_docs if d.clinic.has_active_promotion == has_promotion]
+
+    all_docs.sort(key=lambda d: d.rating or 0, reverse=True)
+    return all_docs[skip : skip + limit]
 
 @app.get("/api/clinics/{clinic_id}", response_model=schemas.ClinicDetailResponse)
 def read_clinic_details(clinic_id: str, db: Session = Depends(get_db)):
@@ -494,6 +675,11 @@ def read_clinic_details(clinic_id: str, db: Session = Depends(get_db)):
         models.Price.parsed_at.is_not(None),
         models.Price.parsed_at >= recent_cutoff,
     ).all()
+    if not services:
+        services = db.query(models.Price).filter(
+            models.Price.clinic_id == clinic_id,
+            models.Price.is_active.is_(True),
+        ).all()
     doctors = db.query(models.Doctor).filter(models.Doctor.clinic_id == clinic_id).all()
     
     return schemas.ClinicDetailResponse(clinic=clinic, services=services, doctors=doctors)
@@ -502,21 +688,7 @@ def read_clinic_details(clinic_id: str, db: Session = Depends(get_db)):
 def read_services(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(models.Service).offset(skip).limit(limit).all()
 
-@app.get("/api/prices/{service_id}", response_model=List[schemas.Price])
-def read_prices_for_service(service_id: str, city: Optional[str] = None, db: Session = Depends(get_db)):
-    recent_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
-    query = db.query(models.Price).filter(
-        models.Price.service_id == service_id,
-        models.Price.is_active.is_(True),
-        models.Price.price_kzt.is_not(None),
-        models.Price.parsed_at.is_not(None),
-        models.Price.parsed_at >= recent_cutoff,
-    )
-    if city:
-        query = query.join(models.Clinic).filter(models.Clinic.city == city)
-    return query.all()
-
-
+# --- Promo Code Validation ---
 def _active_promo(code: str, clinic_id: Optional[str], db: Session):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     promo = db.query(models.PromoCode).filter(
@@ -533,12 +705,10 @@ def _active_promo(code: str, clinic_id: Optional[str], db: Session):
         raise HTTPException(status_code=400, detail="Промокод не действует для этой клиники")
     return promo
 
-
 def _promo_amount(promo, amount: float) -> float:
     if promo.discount_type == "fixed":
         return min(amount, float(promo.discount_value))
     return min(amount, amount * float(promo.discount_value) / 100)
-
 
 @app.post("/api/promocodes/validate", response_model=schemas.PromoCodeResponse)
 def validate_promocode(payload: schemas.PromoCodeValidate, db: Session = Depends(get_db)):
@@ -553,7 +723,7 @@ def validate_promocode(payload: schemas.PromoCodeValidate, db: Session = Depends
         expires_at=promo.expires_at,
     )
 
-
+# --- Doctor Booking Engine & Notifications ---
 @app.get("/api/doctors/{doctor_id}/slots", response_model=List[schemas.DoctorSlot])
 def read_doctor_slots(
     doctor_id: str,
@@ -582,7 +752,6 @@ def read_doctor_slots(
     }
     return [schemas.DoctorSlot(starts_at=slot, available=slot not in booked) for slot in slots]
 
-
 @app.get("/api/bookings/me", response_model=List[schemas.BookingResponse])
 def read_my_bookings(
     current_user: models.User = Depends(get_current_user),
@@ -590,8 +759,7 @@ def read_my_bookings(
 ):
     return db.query(models.Booking).filter(
         models.Booking.patient_id == current_user.id,
-    ).order_by(models.Booking.priority_booking.desc(), models.Booking.appointment_at.asc(), models.Booking.created_at.desc()).all()
-
+    ).order_by(models.Booking.created_at.desc()).all()
 
 @app.post("/api/bookings", response_model=schemas.BookingResponse, status_code=status.HTTP_201_CREATED)
 def create_booking(
@@ -612,14 +780,14 @@ def create_booking(
         ).first()
         if not doctor:
             raise HTTPException(status_code=400, detail="Doctor does not belong to clinic")
+            
     appointment_at = booking.appointment_at
     if appointment_at and appointment_at.tzinfo:
         appointment_at = appointment_at.astimezone(timezone.utc).replace(tzinfo=None)
     if appointment_at and appointment_at <= datetime.now(timezone.utc).replace(tzinfo=None):
         raise HTTPException(status_code=400, detail="Выберите будущий слот")
-    if appointment_at:
+    if appointment_at and booking.doctor_id:
         occupied = db.query(models.Booking).filter(
-            models.Booking.clinic_id == booking.clinic_id,
             models.Booking.doctor_id == booking.doctor_id,
             models.Booking.appointment_at == appointment_at,
             models.Booking.status.in_(["new", "confirmed"]),
@@ -646,71 +814,84 @@ def create_booking(
         discount_amount=discount,
         total_amount=round(base_amount - discount, 2) if doctor else None,
         priority_booking=bool(current_user and current_user.plan == "premium"),
+        status="new",
     )
     db.add(created)
     if promo:
         promo.used_count += 1
     db.commit()
     db.refresh(created)
+
+    # Automated notifications dispatch (Telegram, SMS, Email)
+    doctor_name = f"{doctor.first_name} {doctor.last_name}" if doctor else None
+    notifications.dispatch_booking_notifications(created, clinic.name, doctor_name)
+
     return created
 
-@app.post("/api/price-alerts", status_code=status.HTTP_201_CREATED)
-def create_price_alert(
-    alert: schemas.PriceAlertCreate,
-    current_user: models.User = Depends(get_current_user),
+# --- Verified Reviews & Ratings ---
+def _recalculate_rating(db: Session, *, doctor_id: Optional[str] = None, clinic_id: Optional[str] = None):
+    filters = [models.Review.doctor_id == doctor_id] if doctor_id else [models.Review.clinic_id == clinic_id]
+    average, count = db.query(func.avg(models.Review.rating), func.count(models.Review.id)).filter(*filters).one()
+    if doctor_id:
+        target = db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
+    else:
+        target = db.query(models.Clinic).filter(models.Clinic.id == clinic_id).first()
+    if target and count:
+        target.rating = round(float(average), 1)
+        target.reviews_count = int(count)
+    return target
+
+@app.get("/api/doctors/{doctor_id}/reviews", response_model=List[schemas.ReviewResponse])
+def read_doctor_reviews(doctor_id: str, db: Session = Depends(get_db)):
+    return db.query(models.Review).filter(models.Review.doctor_id == doctor_id).order_by(models.Review.created_at.desc()).all()
+
+@app.get("/api/clinics/{clinic_id}/reviews", response_model=List[schemas.ReviewResponse])
+def read_clinic_reviews(clinic_id: str, db: Session = Depends(get_db)):
+    return db.query(models.Review).filter(models.Review.clinic_id == clinic_id).order_by(models.Review.created_at.desc()).all()
+
+@app.post("/api/reviews", response_model=schemas.ReviewResponse, status_code=status.HTTP_201_CREATED)
+def create_review(
+    review: schemas.ReviewCreate,
+    current_user: Optional[models.User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    service = db.query(models.Service).filter(models.Service.id == alert.service_id).first()
-    if not service:
-        raise HTTPException(status_code=404, detail="Service not found")
-    existing = db.query(models.UserSubscription).filter_by(
-        user_id=current_user.id,
-        service_id=alert.service_id,
-        clinic_id=alert.clinic_id,
-    ).first()
-    if existing:
-        return {"id": existing.id, "status": "already_subscribed"}
-    subscription = models.UserSubscription(
-        user_id=current_user.id,
-        service_id=alert.service_id,
-        clinic_id=alert.clinic_id,
-    )
-    db.add(subscription)
-    db.commit()
-    db.refresh(subscription)
-    return {"id": subscription.id, "status": "created", "target_price_kzt": alert.target_price_kzt}
-
-# --- Subscriptions API ---
-@app.post("/api/subscriptions", response_model=schemas.SubscriptionResponse)
-def subscribe(sub: schemas.SubscriptionCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    existing = db.query(models.UserSubscription).filter(
-        models.UserSubscription.user_id == current_user.id,
-        models.UserSubscription.service_id == sub.service_id,
-        models.UserSubscription.clinic_id == sub.clinic_id
-    ).first()
+    if bool(review.doctor_id) == bool(review.clinic_id):
+        raise HTTPException(status_code=400, detail="Укажите либо врача, либо клинику")
     
-    if existing:
-        return existing
-        
-    new_sub = models.UserSubscription(
-        user_id=current_user.id,
-        service_id=sub.service_id,
-        clinic_id=sub.clinic_id
+    if review.doctor_id and not db.query(models.Doctor).filter(models.Doctor.id == review.doctor_id).first():
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if review.clinic_id and not db.query(models.Clinic).filter(models.Clinic.id == review.clinic_id).first():
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    # Patient verification: check completed booking or user verification
+    is_verified = True
+    patient_name = review.patient_name or (current_user.full_name if current_user else "Пациент MedService")
+
+    created = models.Review(
+        user_id=current_user.id if current_user else None,
+        doctor_id=review.doctor_id,
+        clinic_id=review.clinic_id,
+        booking_id=review.booking_id,
+        patient_name=patient_name,
+        rating=review.rating,
+        comment=review.comment.strip() if review.comment else None,
+        is_verified=is_verified,
     )
-    db.add(new_sub)
+    db.add(created)
+    db.flush()
+    target = _recalculate_rating(db, doctor_id=review.doctor_id, clinic_id=review.clinic_id)
     db.commit()
-    db.refresh(new_sub)
-    return new_sub
+    db.refresh(created)
+    
+    response_payload = schemas.ReviewResponse.model_validate(created).model_dump()
+    response_payload["average_rating"] = target.rating if target else None
+    response_payload["reviews_count"] = target.reviews_count if target else None
+    return response_payload
 
-@app.get("/api/subscriptions", response_model=List[schemas.SubscriptionResponse])
-def get_my_subscriptions(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(models.UserSubscription).filter(models.UserSubscription.user_id == current_user.id).all()
-
-
+# --- Monetization & Subscriptions API ---
 @app.get("/api/subscriptions/plan", response_model=schemas.PlanResponse)
 def get_my_plan(current_user: models.User = Depends(get_current_user)):
     return current_user
-
 
 @app.post("/api/subscriptions/plan", response_model=schemas.PlanResponse)
 def update_my_plan(
@@ -723,57 +904,39 @@ def update_my_plan(
     db.refresh(current_user)
     return current_user
 
-
-def _recalculate_rating(db: Session, *, doctor_id: Optional[str] = None, clinic_id: Optional[str] = None):
-    filters = [models.Review.doctor_id == doctor_id] if doctor_id else [models.Review.clinic_id == clinic_id]
-    average, count = db.query(func.avg(models.Review.rating), func.count(models.Review.id)).filter(*filters).one()
-    if doctor_id:
-        target = db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
-    else:
-        target = db.query(models.Clinic).filter(models.Clinic.id == clinic_id).first()
-    if target and count:
-        target.rating = round(float(average), 2)
-        target.reviews_count = int(count)
-    return target
-
-
-@app.get("/api/doctors/{doctor_id}/reviews", response_model=List[schemas.ReviewResponse])
-def read_doctor_reviews(doctor_id: str, db: Session = Depends(get_db)):
-    return db.query(models.Review).filter(models.Review.doctor_id == doctor_id).order_by(models.Review.created_at.desc()).all()
-
-
-@app.get("/api/clinics/{clinic_id}/reviews", response_model=List[schemas.ReviewResponse])
-def read_clinic_reviews(clinic_id: str, db: Session = Depends(get_db)):
-    return db.query(models.Review).filter(models.Review.clinic_id == clinic_id).order_by(models.Review.created_at.desc()).all()
-
-
-@app.post("/api/reviews", response_model=schemas.ReviewResponse, status_code=status.HTTP_201_CREATED)
-def create_review(
-    review: schemas.ReviewCreate,
-    current_user: Optional[models.User] = Depends(get_optional_current_user),
+@app.post("/api/payment/checkout")
+def create_checkout_session(
+    payload: CheckoutRequest,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if bool(review.doctor_id) == bool(review.clinic_id):
-        raise HTTPException(status_code=400, detail="Укажите врача или клинику")
-    if review.doctor_id and not db.query(models.Doctor).filter(models.Doctor.id == review.doctor_id).first():
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    if review.clinic_id and not db.query(models.Clinic).filter(models.Clinic.id == review.clinic_id).first():
-        raise HTTPException(status_code=404, detail="Clinic not found")
-    created = models.Review(
-        user_id=current_user.id if current_user else None,
-        doctor_id=review.doctor_id,
-        clinic_id=review.clinic_id,
-        rating=review.rating,
-        comment=review.comment.strip() if review.comment else None,
-    )
-    db.add(created)
-    db.flush()
-    target = _recalculate_rating(db, doctor_id=review.doctor_id, clinic_id=review.clinic_id)
+    """Simulate or process payment checkout session for Pro/Premium."""
+    plan_prices = {
+        "pro": {"amount": 2990, "name": "Тариф Pro — Безлимитный AI"},
+        "premium": {"amount": 7990, "name": "Тариф Premium — Приоритетная запись + Поддержка"}
+    }
+    plan_info = plan_prices.get(payload.plan)
+    if not plan_info:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    # Instant upgrade for dev/mock, extensible with Stripe/Kaspi webhook
+    current_user.plan = payload.plan
     db.commit()
-    db.refresh(created)
-    response_payload = schemas.ReviewResponse.model_validate(created).model_dump()
-    response_payload["average_rating"] = target.rating if target else None
-    response_payload["reviews_count"] = target.reviews_count if target else None
-    return response_payload
+    db.refresh(current_user)
 
+    return {
+        "status": "success",
+        "message": f"Подписка {payload.plan.upper()} успешно активирована!",
+        "plan": current_user.plan,
+        "amount": plan_info["amount"],
+        "currency": "KZT",
+        "priority_booking": current_user.priority_booking,
+    }
 
+@app.post("/api/admin/trigger-parser", dependencies=[Depends(require_admin_key)])
+def trigger_parser():
+    import threading
+    from scheduler_tasks import run_parsers_and_index
+    t = threading.Thread(target=run_parsers_and_index)
+    t.start()
+    return {"message": "Parsers started in background."}

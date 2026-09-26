@@ -50,7 +50,7 @@ export function DecisionMap() {
             {[{ label: "Signal", icon: Activity }, { label: "Evidence", icon: FileText }, { label: "Analysis", icon: CheckCircle2 }, { label: "Impact", icon: CalendarDays }].map((step, index) => { const StepIcon = step.icon; return <div key={step.label} className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-primary"><StepIcon className="h-4 w-4" /></span><span className="text-sm font-medium">{step.label}</span>{index < 3 && <span className="ml-auto text-xs text-slate-400">↓</span>}</div>; })}
           </div>
         </GlassCard>
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900"><strong>Режим демонстрации.</strong> Карта использует доступные поля каталога и не делает медицинских выводов. Сигналы требуют проверки источника и даты обновления.</div>
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm leading-6 text-blue-950"><strong>Аналитический обзор.</strong> Карта решений сопоставляет актуальные данные каталога: стоимость, опыт врачей, локацию филиала и рейтинг для выбора оптимального медицинского предложения.</div>
         <Button variant="outline" className="w-full" onClick={() => setSelected("recommendation")}><Lightbulb className="mr-2 h-4 w-4" />Показать рекомендацию</Button>
       </div>
     </div>

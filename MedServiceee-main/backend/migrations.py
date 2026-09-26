@@ -1,15 +1,11 @@
-"""Small, dependency-free schema migration layer for the existing MVP database.
+"""Schema migration layer for MedService database.
 
-The project historically used ``Base.metadata.create_all`` only.  That creates
-new tables but cannot add columns to an existing SQLite database, so this module
-keeps upgrades additive and safe for both SQLite and PostgreSQL.
+Safe and additive for both SQLite and PostgreSQL.
 """
 
 from sqlalchemy import inspect, text
-
 from database import engine
 from models import Base
-
 
 ADDITIVE_COLUMNS = {
     "clinics": {
@@ -18,6 +14,9 @@ ADDITIVE_COLUMNS = {
         "has_active_promotion": "BOOLEAN DEFAULT FALSE",
     },
     "doctors": {
+        "gender": "VARCHAR DEFAULT 'm'",
+        "category": "VARCHAR DEFAULT 'Высшая категория'",
+        "is_pediatric": "BOOLEAN DEFAULT FALSE",
         "languages": "TEXT DEFAULT 'ru,kk'",
     },
     "users": {
@@ -34,12 +33,16 @@ ADDITIVE_COLUMNS = {
         "total_amount": "NUMERIC(10, 2)",
         "priority_booking": "BOOLEAN DEFAULT FALSE",
     },
+    "reviews": {
+        "booking_id": "VARCHAR",
+        "patient_name": "VARCHAR",
+        "is_verified": "BOOLEAN DEFAULT TRUE",
+    }
 }
 
 
 def ensure_schema() -> None:
     """Create missing tables and add missing columns without dropping data."""
-
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
     dialect = engine.dialect.name
@@ -54,14 +57,10 @@ def ensure_schema() -> None:
                     continue
                 if dialect == "postgresql":
                     column_type = column_type.replace("DATETIME", "TIMESTAMP")
-                # PostgreSQL accepts IF NOT EXISTS; SQLite does not. Inspection
-                # above makes the operation idempotent for both engines.
                 table_sql = f'"{table_name}"'
                 column_sql = f'"{column_name}"'
                 connection.execute(text(f"ALTER TABLE {table_sql} ADD COLUMN {column_sql} {column_type}"))
 
-    # ``dialect`` is intentionally read above so a future dialect-specific
-    # migration can be added without changing the application entry point.
     _ = dialect
 
 

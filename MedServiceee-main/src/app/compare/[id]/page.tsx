@@ -5,6 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useParams, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
+import { build2GisRouteUrl, buildGoogleMapsRouteUrl } from "@/lib/maps";
 import { MapPin, Star, ChevronLeft, Navigation, Activity, CheckCircle2, Flame, Map as MapIcon, ArrowUpDown, Search, Table2, Loader2, BrainCircuit } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
