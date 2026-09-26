@@ -1,128 +1,195 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mockData from '@/data/mock_db.json';
+import { incrementSearchUsage, FREE_SEARCH_LIMIT } from '@/lib/quotaStore';
 
-const searchUsageMap = new Map<string, number>();
-const FREE_LIMIT = 20;
+const CITY_ALIASES: Record<string, string> = {
+  astana: 'Астана',
+  астана: 'Астана',
+  'nur-sultan': 'Астана',
+  'нур-султан': 'Астана',
+  almaty: 'Алматы',
+  алматы: 'Алматы',
+  алмата: 'Алматы',
+  shymkent: 'Шымкент',
+  шымкент: 'Шымкент',
+  чимкент: 'Шымкент',
+  karaganda: 'Қарағанды',
+  караганда: 'Қарағанды',
+  қарағанды: 'Қарағанды',
+  aktobe: 'Ақтөбе',
+  актобе: 'Ақтөбе',
+  ақтөбе: 'Ақтөбе',
+  pavlodar: 'Павлодар',
+  павлодар: 'Павлодар',
+};
+
+function normalizeCity(rawCity: string | null): string | null {
+  if (!rawCity) return null;
+  const cleaned = rawCity.toLowerCase().replace(/^(г\.|г\s+|город\s+|қ\.|қ\s+|қаласы)/i, '').trim();
+  return CITY_ALIASES[cleaned] || rawCity;
+}
+
+function resolveCategory(query: string): string | null {
+  if (!query) return null;
+  const q = query.toLowerCase();
+  if (/(анализ|лаборатор|lab|blood|тест|оак|оам|қан|талдау|биохими|пцр|гормон|ферритин|витамин)/i.test(q)) {
+    return 'laboratory';
+  }
+  if (/(прием|приём|врач|doctor|дәрігер|қабылдау|терапевт|педиатр|кардиолог|невропатолог|гинеколог|уролог|лор)/i.test(q)) {
+    return 'doctor_appointment';
+  }
+  if (/(узи|мрт|рентген|кт|диагностика|scanner|экг|эхокг|удз)/i.test(q)) {
+    return 'diagnostics';
+  }
+  if (/(процедура|укол|капельница|массаж|фгдс|инъекци)/i.test(q)) {
+    return 'procedure';
+  }
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const q = (searchParams.get('q') || '').trim().toLowerCase();
-  const city = (searchParams.get('city') || '').trim();
-  const category = (searchParams.get('category') || '').trim();
-  const minPrice = parseFloat(searchParams.get('min_price') || '0');
-  const maxPrice = parseFloat(searchParams.get('max_price') || '999999999');
-  const sortBy = searchParams.get('sort_by') || 'relevance';
-  const onlyPromos = searchParams.get('only_promos') === 'true';
+  const q = (searchParams.get('q') || '').trim();
+  const rawCity = searchParams.get('city');
+  const city = normalizeCity(rawCity);
+  const minRating = searchParams.get('min_rating') ? parseFloat(searchParams.get('min_rating')!) : null;
+  const onlineBooking = searchParams.get('online_booking') === 'true';
+  const hasPromotion = searchParams.get('has_promotion') === 'true';
+  const minPrice = searchParams.get('min_price') ? parseFloat(searchParams.get('min_price')!) : null;
+  const maxPrice = searchParams.get('max_price') ? parseFloat(searchParams.get('max_price')!) : null;
+  const sortBy = searchParams.get('sort_by') || '';
+  const specialty = (searchParams.get('specialty') || '').toLowerCase().trim();
 
   const sessionId = req.headers.get('x-search-session') || req.headers.get('x-forwarded-for') || 'guest_default';
-  const currentUsage = searchUsageMap.get(sessionId) || 0;
+  const quotaResult = incrementSearchUsage(sessionId);
 
-  if (currentUsage >= FREE_LIMIT) {
+  if (quotaResult.blocked) {
     return NextResponse.json(
       {
         detail: {
           code: 'SEARCH_LIMIT_REACHED',
           message: 'Тегін іздеу лимиті (20/20) таусылды. Шексіз іздеу үшін тарифті таңдаңыз.',
           limit_reached: true,
-          searches_used: currentUsage,
-          limit: FREE_LIMIT,
+          searches_used: quotaResult.used,
+          limit: FREE_SEARCH_LIMIT,
         },
       },
       { status: 402 }
     );
   }
 
-  // Increment usage
-  const newUsage = currentUsage + 1;
-  searchUsageMap.set(sessionId, newUsage);
-  const remaining = Math.max(0, FREE_LIMIT - newUsage);
-
-  // Group prices by service
   const clinicsMap = new Map<string, any>(mockData.clinics.map((c: any) => [c.id, c]));
+  const servicesMap = new Map<string, any>(mockData.services.map((s: any) => [s.id, s]));
+
+  const queryCategory = resolveCategory(q);
+  const qTokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+
+  // Group prices by service_id
   const serviceOffersMap = new Map<string, { service: any; offers: any[] }>();
 
-  for (const p of mockData.prices as any[]) {
-    const clinic = clinicsMap.get(p.clinic_id);
-    if (!clinic) continue;
+  for (const priceObj of mockData.prices as any[]) {
+    const clinic = clinicsMap.get(priceObj.clinic_id);
+    const service = servicesMap.get(priceObj.service_id);
+    if (!clinic || !service) continue;
 
-    if (city && city.toLowerCase() !== 'барлық қалалар' && city.toLowerCase() !== 'все города') {
-      const cCity = (clinic.city || '').toLowerCase();
-      const sCity = city.toLowerCase();
-      if (!cCity.includes(sCity) && !sCity.includes(cCity)) continue;
+    // Filter by city
+    if (city && city !== 'Барлық қалалар' && city !== 'Все города') {
+      const clinicCity = (clinic.city || '').toLowerCase();
+      const targetCity = city.toLowerCase();
+      if (!clinicCity.includes(targetCity) && !targetCity.includes(clinicCity)) {
+        continue;
+      }
     }
 
-    const priceVal = parseFloat(p.price || 0);
-    if (priceVal < minPrice || priceVal > maxPrice) continue;
-    if (onlyPromos && !clinic.has_active_promotion && !p.is_promotional) continue;
+    // Filter by clinic attributes
+    if (minRating !== null && (clinic.rating || 0) < minRating) continue;
+    if (onlineBooking && !clinic.has_online_booking) continue;
+    if (hasPromotion && !clinic.has_active_promotion && !priceObj.is_promotional) continue;
 
-    const s = mockData.services.find((serv: any) => serv.id === p.service_id);
-    if (!s) continue;
+    // Filter by price
+    const priceVal = parseFloat(priceObj.price_kzt || priceObj.price || 0);
+    if (minPrice !== null && priceVal < minPrice) continue;
+    if (maxPrice !== null && priceVal > maxPrice) continue;
 
-    if (category && s.category !== category) continue;
-
-    if (q) {
-      const qTokens = q.split(/\s+/).filter(Boolean);
-      const matchName = qTokens.some((t: string) => (s.name || '').toLowerCase().includes(t));
-      const matchCat = qTokens.some((t: string) => (s.category || '').toLowerCase().includes(t));
-      const matchClinic = qTokens.some((t: string) => (clinic.name || '').toLowerCase().includes(t));
-      const matchSpec = qTokens.some((t: string) => (s.specialty || '').toLowerCase().includes(t));
-      if (!matchName && !matchCat && !matchClinic && !matchSpec) continue;
+    // Filter by specialty if provided
+    if (specialty) {
+      const sRaw = (service.name_raw || '').toLowerCase();
+      if (!sRaw.includes(specialty)) continue;
     }
 
-    if (!serviceOffersMap.has(s.id)) {
-      serviceOffersMap.set(s.id, { service: s, offers: [] });
+    // Filter by query / category
+    if (qTokens.length > 0) {
+      const sNorm = (service.name_norm || '').toLowerCase();
+      const sRaw = (service.name_raw || '').toLowerCase();
+      const cName = (clinic.name || '').toLowerCase();
+      const sCat = (service.category || '').toLowerCase();
+
+      const matchesCat = queryCategory && sCat === queryCategory;
+      const matchesText = qTokens.some(
+        (token) => sNorm.includes(token) || sRaw.includes(token) || cName.includes(token)
+      );
+
+      if (!matchesCat && !matchesText) continue;
     }
 
-    serviceOffersMap.get(s.id)!.offers.push({
-      clinic_id: clinic.id,
-      clinic_name: clinic.name,
-      clinic_address: clinic.address,
-      clinic_city: clinic.city,
-      rating: clinic.rating,
-      reviews_count: clinic.reviews_count,
-      latitude: clinic.latitude,
-      longitude: clinic.longitude,
+    if (!serviceOffersMap.has(service.id)) {
+      serviceOffersMap.set(service.id, { service, offers: [] });
+    }
+
+    serviceOffersMap.get(service.id)!.offers.push({
+      clinic,
       price: priceVal,
-      old_price: p.old_price,
-      is_promotional: p.is_promotional || clinic.has_active_promotion,
-      has_online_booking: clinic.has_online_booking,
-      phone: clinic.phone,
-      source_url: clinic.source_url,
-      photo_url: clinic.photo_url,
+      parsed_at: priceObj.parsed_at,
     });
   }
 
+  // Construct SearchResult items
   const results = Array.from(serviceOffersMap.values()).map(({ service, offers }) => {
     offers.sort((a, b) => a.price - b.price);
-    const minOffer = offers[0];
-    const maxOffer = offers[offers.length - 1];
-    const avgPrice = Math.round(offers.reduce((acc, curr) => acc + curr.price, 0) / offers.length);
+    const bestOffer = offers[0];
+    const avgPrice = Math.round(offers.reduce((sum, item) => sum + item.price, 0) / offers.length);
 
     return {
-      service_id: service.id,
-      service_name: service.name,
-      category: service.category,
-      min_price: minOffer.price,
-      max_price: maxOffer.price,
+      service: {
+        id: service.id,
+        name_raw: service.name_raw,
+        category: service.category,
+      },
       avg_price: avgPrice,
-      total_clinics: offers.length,
-      best_offer: minOffer,
-      clinics: offers,
+      min_price: bestOffer.price,
+      clinics_count: offers.length,
+      best_offer_clinic: {
+        id: bestOffer.clinic.id,
+        name: bestOffer.clinic.name,
+        city: bestOffer.clinic.city,
+        address: bestOffer.clinic.address,
+        rating: bestOffer.clinic.rating,
+        has_online_booking: Boolean(bestOffer.clinic.has_online_booking),
+        has_active_promotion: Boolean(bestOffer.clinic.has_active_promotion),
+        latitude: bestOffer.clinic.latitude,
+        longitude: bestOffer.clinic.longitude,
+        source_url: bestOffer.clinic.source_url,
+      },
+      best_offer_price: bestOffer.price,
+      last_updated_at: bestOffer.parsed_at || new Date().toISOString(),
     };
   });
 
+  // Sort results
   if (sortBy === 'price_asc') {
     results.sort((a, b) => a.min_price - b.min_price);
   } else if (sortBy === 'price_desc') {
     results.sort((a, b) => b.min_price - a.min_price);
-  } else if (sortBy === 'rating') {
-    results.sort((a, b) => (b.best_offer?.rating || 0) - (a.best_offer?.rating || 0));
+  } else if (sortBy === 'rating_desc') {
+    results.sort((a, b) => (b.best_offer_clinic?.rating || 0) - (a.best_offer_clinic?.rating || 0));
+  } else if (sortBy === 'date_desc') {
+    results.sort((a, b) => (b.last_updated_at || '').localeCompare(a.last_updated_at || ''));
   }
 
   const response = NextResponse.json(results);
-  response.headers.set('X-Search-Remaining', String(remaining));
-  response.headers.set('X-Search-Limit', String(FREE_LIMIT));
-  response.headers.set('X-Search-Unlimited', 'false');
-  response.headers.set('X-Search-Plan', 'free');
+  response.headers.set('X-Search-Remaining', String(quotaResult.remaining));
+  response.headers.set('X-Search-Limit', String(quotaResult.limit));
+  response.headers.set('X-Search-Unlimited', quotaResult.plan !== 'free' ? 'true' : 'false');
+  response.headers.set('X-Search-Plan', quotaResult.plan);
   return response;
 }

@@ -28,21 +28,7 @@ export function getAppUrl(): string {
 
 export function getApiUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL;
-  
-  if (typeof window !== 'undefined') {
-    // In production browser (e.g. *.vercel.app or custom domain)
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      if (configured && configured.trim() && !configured.includes('localhost') && !configured.includes('127.0.0.1')) {
-        return configured.trim().replace(/\/+$/, '');
-      }
-      // Use same-origin serverless API routes
-      return '';
-    }
-    // In local development
-    return configured && configured.trim() ? configured.trim().replace(/\/+$/, '') : 'http://localhost:8000';
-  }
-
-  if (configured && configured.trim() && !configured.includes('localhost') && !configured.includes('127.0.0.1')) {
+  if (configured && configured.trim()) {
     return configured.trim().replace(/\/+$/, '');
   }
   return '';

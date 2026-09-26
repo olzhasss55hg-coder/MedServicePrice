@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { ClinicCard } from "@/components/ClinicCard"
 import { useTranslation } from "@/i18n/LanguageContext"
-import { API_URL, getSearchSessionId } from "@/lib/api"
+import { buildApiUrl, getSearchSessionId } from "@/lib/api"
 import { usePaywall } from "@/components/PaywallContext"
 
 interface Clinic {
@@ -111,19 +111,20 @@ function SearchPageContent() {
     const sessionId = getSearchSessionId()
 
     try {
-      let url = `${API_URL}/api/search?city=${encodeURIComponent(c || "Алматы")}`
+      let path = `/api/search?city=${encodeURIComponent(c || "Алматы")}`
       if (q && q.trim().length > 0) {
-        url += `&q=${encodeURIComponent(q.trim())}`
+        path += `&q=${encodeURIComponent(q.trim())}`
       }
-      if (minR !== null) url += `&min_rating=${minR}`
-      if (onB !== null) url += `&online_booking=${onB}`
-      if (sBy) url += `&sort_by=${sBy}`
-      if (minP !== null) url += `&min_price=${minP}`
-      if (maxP !== null) url += `&max_price=${maxP}`
-      if (selectedSpecialty) url += `&specialty=${encodeURIComponent(selectedSpecialty)}`
-      if (selectedLanguage) url += `&language=${encodeURIComponent(selectedLanguage)}`
-      if (selectedPromotion !== null) url += `&has_promotion=${selectedPromotion}`
+      if (minR !== null) path += `&min_rating=${minR}`
+      if (onB !== null) path += `&online_booking=${onB}`
+      if (sBy) path += `&sort_by=${sBy}`
+      if (minP !== null) path += `&min_price=${minP}`
+      if (maxP !== null) path += `&max_price=${maxP}`
+      if (selectedSpecialty) path += `&specialty=${encodeURIComponent(selectedSpecialty)}`
+      if (selectedLanguage) path += `&language=${encodeURIComponent(selectedLanguage)}`
+      if (selectedPromotion !== null) path += `&has_promotion=${selectedPromotion}`
 
+      const url = buildApiUrl(path)
       const res = await fetch(url, {
         headers: {
           "X-Search-Session": sessionId,
