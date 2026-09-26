@@ -28,24 +28,33 @@ export function getAppUrl(): string {
 
 export function getApiUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL;
-  if (configured && configured.trim()) {
+  
+  if (typeof window !== 'undefined') {
+    // In production browser (e.g. *.vercel.app or custom domain)
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      if (configured && configured.trim() && !configured.includes('localhost') && !configured.includes('127.0.0.1')) {
+        return configured.trim().replace(/\/+$/, '');
+      }
+      // Use same-origin serverless API routes
+      return '';
+    }
+    // In local development
+    return configured && configured.trim() ? configured.trim().replace(/\/+$/, '') : 'http://localhost:8000';
+  }
+
+  if (configured && configured.trim() && !configured.includes('localhost') && !configured.includes('127.0.0.1')) {
     return configured.trim().replace(/\/+$/, '');
   }
-  if (typeof window !== 'undefined') {
-    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? 'http://localhost:8000'
-      : window.location.origin;
-  }
-  return 'http://localhost:8000';
+  return '';
 }
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
 export const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || 'https://medservice.kz').replace(/\/+$/, '');
 
 export function buildApiUrl(path: string): string {
   const base = getApiUrl();
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${normalizedPath}`;
+  return base ? `${base}${normalizedPath}` : normalizedPath;
 }
 
 export function getSearchSessionId(): string {

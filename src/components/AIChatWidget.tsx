@@ -5,7 +5,7 @@ import { MessageSquare, X, Send, Bot, User, Loader2, Sparkles, Crown, Globe } fr
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { API_URL, api } from "@/lib/api";
+import { API_URL, api, buildApiUrl } from "@/lib/api";
 import { useTranslation } from "@/i18n/LanguageContext";
 import { useToast } from "@/components/ui/ToastContext";
 
@@ -79,7 +79,7 @@ export function AIChatWidget() {
     setIsLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`, {
+      const res = await fetch(buildApiUrl("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-AI-Session": aiSessionId },
         body: JSON.stringify({ message: promptToSend, language: chatLang })
