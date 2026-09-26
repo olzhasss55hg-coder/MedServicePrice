@@ -103,8 +103,8 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="text-zinc-500">
                       {locale === 'kk' 
-                        ? `Тегін іздеу лимиті: ${quota?.used_count ?? 0}/20`
-                        : `Лимит бесплатных поисков: ${quota?.used_count ?? 0}/20`}
+                        ? `Тегін іздеу лимиті: ${quota?.searches_used ?? 0}/20`
+                        : `Лимит бесплатных поисков: ${quota?.searches_used ?? 0}/20`}
                     </span>
                     <button 
                       type="button"

@@ -16,7 +16,37 @@ import {
   SearchQuota,
 } from './types';
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export function getAppUrl(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return 'https://medservice.kz';
+}
+
+export function getApiUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured && configured.trim()) {
+    return configured.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'http://localhost:8000'
+      : window.location.origin;
+  }
+  return 'http://localhost:8000';
+}
+
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+export const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || 'https://medservice.kz').replace(/\/+$/, '');
+
+export function buildApiUrl(path: string): string {
+  const base = getApiUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${normalizedPath}`;
+}
 
 export function getSearchSessionId(): string {
   if (typeof window === 'undefined') return 'server-session';
@@ -38,8 +68,12 @@ export class SearchLimitExceededError extends Error {
 }
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const fullUrl = url.startsWith('http://') || url.startsWith('https://') 
+    ? url 
+    : buildApiUrl(url);
+
   const sessionId = getSearchSessionId();
-  const res = await fetch(url, {
+  const res = await fetch(fullUrl, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -81,7 +115,7 @@ export const api = {
         cleanParams.append(k, String(v));
       }
     });
-    return fetchJson<SearchResult[]>(`${API_URL}/api/search?${cleanParams.toString()}`);
+    return fetchJson<SearchResult[]>(buildApiUrl(`/api/search?${cleanParams.toString()}`));
   },
 
   // Clinics
@@ -94,11 +128,11 @@ export const api = {
         }
       });
     }
-    return fetchJson<Clinic[]>(`${API_URL}/api/clinics?${cleanParams.toString()}`);
+    return fetchJson<Clinic[]>(buildApiUrl(`/api/clinics?${cleanParams.toString()}`));
   },
 
   getClinicDetails: (id: string) => {
-    return fetchJson<ClinicDetail>(`${API_URL}/api/clinics/${id}`);
+    return fetchJson<ClinicDetail>(buildApiUrl(`/api/clinics/${id}`));
   },
 
   getClinicsInBounds: (minLat: number, maxLat: number, minLng: number, maxLng: number, city?: string) => {
@@ -109,7 +143,7 @@ export const api = {
       max_lng: String(maxLng),
     });
     if (city) cleanParams.append('city', city);
-    return fetchJson<any[]>(`${API_URL}/api/clinics/bounds?${cleanParams.toString()}`);
+    return fetchJson<any[]>(buildApiUrl(`/api/clinics/bounds?${cleanParams.toString()}`));
   },
 
   // Doctors
@@ -122,14 +156,14 @@ export const api = {
         }
       });
     }
-    return fetchJson<Doctor[]>(`${API_URL}/api/doctors?${cleanParams.toString()}`);
+    return fetchJson<Doctor[]>(buildApiUrl(`/api/doctors?${cleanParams.toString()}`));
   },
 
   getDoctorSlots: (doctorId: string, date?: string) => {
-    const url = date
-      ? `${API_URL}/api/doctors/${doctorId}/slots?date=${date}`
-      : `${API_URL}/api/doctors/${doctorId}/slots`;
-    return fetchJson<DoctorSlot[]>(url);
+    const path = date
+      ? `/api/doctors/${doctorId}/slots?date=${date}`
+      : `/api/doctors/${doctorId}/slots`;
+    return fetchJson<DoctorSlot[]>(buildApiUrl(path));
   },
 
   // Bookings
@@ -142,19 +176,19 @@ export const api = {
     appointment_at?: string | null;
     promo_code?: string | null;
   }) => {
-    return fetchJson<Booking>(`${API_URL}/api/bookings`, {
+    return fetchJson<Booking>(buildApiUrl('/api/bookings'), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
 
   getMyBookings: () => {
-    return fetchJson<Booking[]>(`${API_URL}/api/bookings/me`);
+    return fetchJson<Booking[]>(buildApiUrl('/api/bookings/me'));
   },
 
   // Promo Codes
   validatePromoCode: (code: string, amount: number, clinic_id?: string) => {
-    return fetchJson<PromoCodeResponse>(`${API_URL}/api/promocodes/validate`, {
+    return fetchJson<PromoCodeResponse>(buildApiUrl('/api/promocodes/validate'), {
       method: 'POST',
       body: JSON.stringify({ code, amount, clinic_id }),
     });
@@ -162,11 +196,11 @@ export const api = {
 
   // Reviews
   getDoctorReviews: (doctorId: string) => {
-    return fetchJson<Review[]>(`${API_URL}/api/doctors/${doctorId}/reviews`);
+    return fetchJson<Review[]>(buildApiUrl(`/api/doctors/${doctorId}/reviews`));
   },
 
   getClinicReviews: (clinicId: string) => {
-    return fetchJson<Review[]>(`${API_URL}/api/clinics/${clinicId}/reviews`);
+    return fetchJson<Review[]>(buildApiUrl(`/api/clinics/${clinicId}/reviews`));
   },
 
   createReview: (payload: {
@@ -177,7 +211,7 @@ export const api = {
     patient_name?: string;
     booking_id?: string | null;
   }) => {
-    return fetchJson<Review>(`${API_URL}/api/reviews`, {
+    return fetchJson<Review>(buildApiUrl('/api/reviews'), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -185,15 +219,15 @@ export const api = {
 
   // Subscriptions & Plans
   getMyPlan: () => {
-    return fetchJson<UserPlan>(`${API_URL}/api/subscriptions/plan`);
+    return fetchJson<UserPlan>(buildApiUrl('/api/subscriptions/plan'));
   },
 
   getSearchQuota: () => {
-    return fetchJson<SearchQuota>(`${API_URL}/api/search/quota`);
+    return fetchJson<SearchQuota>(buildApiUrl('/api/search/quota'));
   },
 
   upgradePlan: (plan: 'standard' | 'premium' | 'pro' | 'vip' | 'free') => {
-    return fetchJson<{ status: string; message: string; plan: string; priority_booking?: boolean; is_unlimited_search?: boolean }>(`${API_URL}/api/payment/checkout`, {
+    return fetchJson<{ status: string; message: string; plan: string; priority_booking?: boolean; is_unlimited_search?: boolean }>(buildApiUrl('/api/payment/checkout'), {
       method: 'POST',
       body: JSON.stringify({ plan }),
     });
@@ -206,7 +240,7 @@ export const api = {
     language?: string;
     city?: string;
   }) => {
-    return fetchJson<SymptomCheckResponse>(`${API_URL}/api/ai/symptom-checker`, {
+    return fetchJson<SymptomCheckResponse>(buildApiUrl('/api/ai/symptom-checker'), {
       method: 'POST',
       body: JSON.stringify(payload),
     });

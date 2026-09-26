@@ -210,6 +210,8 @@ export default function ProfilePage() {
             </p>
           </div>
         </div>
+      </div>
+
       {/* Bookings List (Module 6) */}
       <section className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-200 flex items-center justify-between">
