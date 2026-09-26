@@ -116,6 +116,8 @@ class User(Base):
     plan = Column(String, default="free", nullable=False, index=True) # "free", "pro", "premium"
     ai_requests_used = Column(Integer, default=0, nullable=False)
     ai_usage_period_started_at = Column(DateTime, default=utc_now, nullable=True)
+    search_requests_used = Column(Integer, default=0, nullable=False)
+    search_usage_period_started_at = Column(DateTime, default=utc_now, nullable=True)
     
     subscriptions = relationship("UserSubscription", back_populates="user")
     bookings = relationship("Booking", back_populates="patient")
@@ -123,7 +125,15 @@ class User(Base):
 
     @property
     def priority_booking(self):
-        return self.plan == "premium"
+        return self.plan == "premium" or self.plan == "vip"
+
+    @property
+    def is_unlimited_search(self):
+        return self.plan in {"pro", "premium", "vip", "standard", "обычный"}
+
+    @property
+    def search_limit(self):
+        return None if self.is_unlimited_search else 20
 
     @property
     def ai_limit(self):
@@ -213,6 +223,14 @@ class AIUsage(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     session_key = Column(String, unique=True, index=True, nullable=False)
     requests_used = Column(Integer, default=0, nullable=False)
+    period_started_at = Column(DateTime, default=utc_now, nullable=False)
+
+class SearchUsage(Base):
+    __tablename__ = "search_usage"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    session_key = Column(String, unique=True, index=True, nullable=False)
+    searches_used = Column(Integer, default=0, nullable=False)
     period_started_at = Column(DateTime, default=utc_now, nullable=False)
 
 class RawData(Base):

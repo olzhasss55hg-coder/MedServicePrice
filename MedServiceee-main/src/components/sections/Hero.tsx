@@ -7,9 +7,11 @@ import { MapPin, Search, Activity } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import Link from "next/link"
 import { useTranslation } from "@/i18n/LanguageContext"
+import { usePaywall } from "@/components/PaywallContext"
 
 export function Hero() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const { quota, openPaywall } = usePaywall();
   const [searchQuery, setSearchQuery] = useState("")
   const [city, setCity] = useState("Алматы")
   const router = useRouter()
@@ -89,13 +91,42 @@ export function Hero() {
                   {t('hero.searchButton')}
                 </Button>
               </div>
+
+              {/* Subtle Search Quota Indicator */}
+              <div className="mt-3 flex items-center justify-between px-2 text-xs">
+                {quota?.is_unlimited ? (
+                  <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>{quota.plan === 'premium' || quota.plan === 'vip' ? 'VIP Премиум тарифі: Шексіз іздеу' : 'Standard тарифі: Шексіз іздеу'}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500">
+                      {locale === 'kk' 
+                        ? `Тегін іздеу лимиті: ${quota?.used_count ?? 0}/20`
+                        : `Лимит бесплатных поисков: ${quota?.used_count ?? 0}/20`}
+                    </span>
+                    <button 
+                      type="button"
+                      onClick={() => openPaywall()}
+                      className="text-primary hover:underline font-semibold text-[11px] bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded-full transition-colors"
+                    >
+                      {locale === 'kk' ? 'Шексіз ету' : 'Снять лимит'}
+                    </button>
+                  </div>
+                )}
+                
+                <span className="text-zinc-400 text-[11px] hidden sm:inline">
+                  {locale === 'kk' ? '20 тегін іздеу сыйлыққа' : '20 бесплатных запросов'}
+                </span>
+              </div>
             </motion.div>
 
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
-              className="pt-8"
+              className="pt-4"
             >
               <p className="text-sm font-medium text-zinc-500 mb-4">{t('hero.popular')}</p>
               <div className="flex flex-wrap gap-2">
@@ -116,7 +147,7 @@ export function Hero() {
           >
             <div className="relative w-[500px] h-[500px]">
               {/* Abstract Representation of Map and Clinics */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-blue-50 to-white rounded-[3rem] shadow-2xl border border-white/60 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-tr from-teal-50 to-white rounded-[3rem] shadow-2xl border border-white/60 overflow-hidden">
                 <div className="absolute w-full h-full bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 mix-blend-overlay"></div>
                 
                 {/* Floating Elements representing UI */}

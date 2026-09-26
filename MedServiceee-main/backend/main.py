@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     language: Optional[str] = Field(default=None, pattern="^(ru|kz)$")
 
 class CheckoutRequest(BaseModel):
-    plan: str = Field(pattern="^(pro|premium)$")
+    plan: str = Field(pattern="^(free|standard|premium|pro|vip)$")
     payment_method: Optional[str] = "card"
 
 MEILI_URL = os.getenv("MEILI_URL", "http://localhost:7700")
@@ -242,9 +242,124 @@ def logout(response: Response):
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
+# --- Search Quota & Usage Guard ---
+FREE_SEARCH_LIMIT = 20
+
+def get_search_quota_info(user: Optional[models.User], session_key: str, db: Session) -> dict:
+    """Return current search quota metrics without incrementing counter."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if user and user.is_unlimited_search:
+        return {
+            "plan": user.plan,
+            "is_unlimited": True,
+            "searches_used": user.search_requests_used,
+            "search_limit": None,
+            "remaining": None,
+            "priority_booking": user.priority_booking,
+        }
+    if user:
+        period_started = user.search_usage_period_started_at
+        if not period_started or now - period_started >= timedelta(days=30):
+            user.search_requests_used = 0
+            user.search_usage_period_started_at = now
+            db.commit()
+        used = user.search_requests_used
+        return {
+            "plan": user.plan or "free",
+            "is_unlimited": False,
+            "searches_used": used,
+            "search_limit": FREE_SEARCH_LIMIT,
+            "remaining": max(0, FREE_SEARCH_LIMIT - used),
+            "priority_booking": user.priority_booking,
+        }
+    
+    usage = db.query(models.SearchUsage).filter(models.SearchUsage.session_key == session_key).first()
+    used = 0
+    if usage:
+        if now - usage.period_started_at >= timedelta(days=30):
+            usage.searches_used = 0
+            usage.period_started_at = now
+            db.commit()
+        used = usage.searches_used
+    return {
+        "plan": "free",
+        "is_unlimited": False,
+        "searches_used": used,
+        "search_limit": FREE_SEARCH_LIMIT,
+        "remaining": max(0, FREE_SEARCH_LIMIT - used),
+        "priority_booking": False,
+    }
+
+def consume_search_quota(user: Optional[models.User], session_key: str, db: Session) -> Optional[int]:
+    """Atomically consume one search query. Raises 402 if free limit is reached."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if user and user.is_unlimited_search:
+        return None
+
+    if user:
+        period_started = user.search_usage_period_started_at
+        if not period_started or now - period_started >= timedelta(days=30):
+            user.search_requests_used = 0
+            user.search_usage_period_started_at = now
+        if user.search_requests_used >= FREE_SEARCH_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "SEARCH_LIMIT_REACHED",
+                    "message": "Тегін іздеу лимиті (20 сұраныс) таусылды. Шексіз іздеу үшін Standard немесе Premium тарифіне өтіңіз.",
+                    "limit_reached": True,
+                    "searches_used": user.search_requests_used,
+                    "search_limit": FREE_SEARCH_LIMIT,
+                    "remaining": 0,
+                    "plan": user.plan,
+                },
+            )
+        user.search_requests_used += 1
+        db.commit()
+        return FREE_SEARCH_LIMIT - user.search_requests_used
+
+    usage = db.query(models.SearchUsage).filter(models.SearchUsage.session_key == session_key).first()
+    if not usage:
+        usage = models.SearchUsage(session_key=session_key, searches_used=0, period_started_at=now)
+        db.add(usage)
+        db.flush()
+    elif now - usage.period_started_at >= timedelta(days=30):
+        usage.searches_used = 0
+        usage.period_started_at = now
+    
+    if usage.searches_used >= FREE_SEARCH_LIMIT:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "SEARCH_LIMIT_REACHED",
+                "message": "Тегін іздеу лимиті (20 сұраныс) таусылды. Шексіз іздеу үшін Standard немесе Premium тарифіне өтіңіз.",
+                "limit_reached": True,
+                "searches_used": usage.searches_used,
+                "search_limit": FREE_SEARCH_LIMIT,
+                "remaining": 0,
+                "plan": "free",
+            },
+        )
+    usage.searches_used += 1
+    db.commit()
+    return FREE_SEARCH_LIMIT - usage.searches_used
+
+@app.get("/api/search/quota", response_model=schemas.SearchQuotaResponse)
+def get_search_quota(
+    request: Request,
+    x_search_session: Optional[str] = Header(default=None),
+    current_user: Optional[models.User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db)
+):
+    session_key = x_search_session or f"guest:{request.client.host if request.client else 'unknown'}"
+    return get_search_quota_info(current_user, session_key, db)
+
 # --- Search API with Combined Advanced Filters ---
 @app.get("/api/search", response_model=List[schemas.UnifiedSearchResult])
 def search_services(
+    request: Request,
+    response: Response,
     q: Optional[str] = Query(None),
     category: Optional[str] = None,
     city: Optional[str] = None,
@@ -259,8 +374,18 @@ def search_services(
     min_price_filter: Optional[float] = Query(None, alias="min_price", ge=0),
     max_price_filter: Optional[float] = Query(None, alias="max_price", ge=0),
     sort_by: Optional[str] = None,
+    x_search_session: Optional[str] = Header(default=None),
+    current_user: Optional[models.User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
+    session_key = x_search_session or f"guest:{request.client.host if request.client else 'unknown'}"
+    remaining = consume_search_quota(current_user, session_key, db)
+    if remaining is not None:
+        response.headers["X-Search-Remaining"] = str(remaining)
+        response.headers["X-Search-Limit"] = str(FREE_SEARCH_LIMIT)
+    else:
+        response.headers["X-Search-Unlimited"] = "true"
+    response.headers["X-Search-Plan"] = current_user.plan if current_user else "free"
     city_clean = (city or "").strip()
     city_clinic_ids = None
     if city_clean:
@@ -688,6 +813,36 @@ def read_clinic_details(clinic_id: str, db: Session = Depends(get_db)):
 def read_services(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(models.Service).offset(skip).limit(limit).all()
 
+@app.get("/api/services/{service_id}", response_model=schemas.Service)
+def read_service_by_id(service_id: str, db: Session = Depends(get_db)):
+    service = db.query(models.Service).filter(models.Service.id == service_id).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    return service
+
+@app.get("/api/prices/{service_id}", response_model=List[schemas.Price])
+def read_prices_for_service(
+    service_id: str,
+    city: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    service = db.query(models.Service).filter(models.Service.id == service_id).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    query = db.query(models.Price).join(models.Clinic).filter(
+        models.Price.service_id == service_id,
+        models.Price.is_active.is_(True)
+    )
+    all_prices = query.all()
+    if city and city.strip():
+        matched_prices = [p for p in all_prices if is_city_match(p.clinic.city, city)]
+        # If city matching yielded results, return them; otherwise return all prices if query without city
+        return matched_prices
+    
+    return all_prices
+
+
 # --- Promo Code Validation ---
 def _active_promo(code: str, clinic_id: Optional[str], db: Session):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -813,7 +968,7 @@ def create_booking(
         promo_code=promo.code if promo else None,
         discount_amount=discount,
         total_amount=round(base_amount - discount, 2) if doctor else None,
-        priority_booking=bool(current_user and current_user.plan == "premium"),
+        priority_booking=bool(current_user and (current_user.priority_booking or current_user.plan in {"premium", "vip"})),
         status="new",
     )
     db.add(created)
@@ -827,6 +982,26 @@ def create_booking(
     notifications.dispatch_booking_notifications(created, clinic.name, doctor_name)
 
     return created
+
+@app.get("/api/clinics/{clinic_id}/bookings", response_model=List[schemas.BookingResponse])
+def read_clinic_bookings(clinic_id: str, db: Session = Depends(get_db)):
+    """Return bookings for clinic with VIP/Priority bookings pinned to the very top of queue."""
+    return db.query(models.Booking).filter(
+        models.Booking.clinic_id == clinic_id
+    ).order_by(
+        models.Booking.priority_booking.desc(),
+        models.Booking.created_at.desc()
+    ).all()
+
+@app.get("/api/doctors/{doctor_id}/bookings", response_model=List[schemas.BookingResponse])
+def read_doctor_bookings(doctor_id: str, db: Session = Depends(get_db)):
+    """Return bookings for doctor with VIP/Priority bookings pinned to the very top of queue."""
+    return db.query(models.Booking).filter(
+        models.Booking.doctor_id == doctor_id
+    ).order_by(
+        models.Booking.priority_booking.desc(),
+        models.Booking.created_at.desc()
+    ).all()
 
 # --- Verified Reviews & Ratings ---
 def _recalculate_rating(db: Session, *, doctor_id: Optional[str] = None, clinic_id: Optional[str] = None):
@@ -910,16 +1085,18 @@ def create_checkout_session(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Simulate or process payment checkout session for Pro/Premium."""
+    """Simulate or process payment checkout session for Standard / Premium (VIP)."""
     plan_prices = {
-        "pro": {"amount": 2990, "name": "Тариф Pro — Безлимитный AI"},
-        "premium": {"amount": 7990, "name": "Тариф Premium — Приоритетная запись + Поддержка"}
+        "standard": {"amount": 1990, "name": "Тариф Standard — Шексіз іздеу (Безлимитный поиск)"},
+        "premium": {"amount": 4990, "name": "Тариф Premium (VIP) — Шексіз іздеу + VIP Басымдықты жазылу"},
+        "pro": {"amount": 1990, "name": "Тариф Pro / Standard — Безлимитный поиск и AI"},
+        "vip": {"amount": 4990, "name": "Тариф VIP — Приоритетная запись + Поддержка"},
+        "free": {"amount": 0, "name": "Тариф Free — 20 тегін іздеу"},
     }
     plan_info = plan_prices.get(payload.plan)
     if not plan_info:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
-    # Instant upgrade for dev/mock, extensible with Stripe/Kaspi webhook
     current_user.plan = payload.plan
     db.commit()
     db.refresh(current_user)
@@ -930,6 +1107,7 @@ def create_checkout_session(
         "plan": current_user.plan,
         "amount": plan_info["amount"],
         "currency": "KZT",
+        "is_unlimited_search": current_user.is_unlimited_search,
         "priority_booking": current_user.priority_booking,
     }
 

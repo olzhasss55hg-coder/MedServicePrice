@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { 
   X, ExternalLink, Calendar, Clock, Tag, User, Phone, Mail, 
-  CheckCircle2, Sparkles, AlertCircle, Building2, Stethoscope, ChevronRight 
+  CheckCircle2, Sparkles, AlertCircle, Building2, Stethoscope, ChevronRight, Crown, Star 
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/ToastContext";
 import { useTranslation } from "@/i18n/LanguageContext";
+import { usePaywall } from "@/components/PaywallContext";
 import { API_URL, api } from "@/lib/api";
 import type { Doctor, PromoCodeResponse } from "@/lib/types";
 
@@ -41,8 +43,26 @@ export function DualBookingModal({
   basePrice = 10000,
 }: DualBookingModalProps) {
   const { locale } = useTranslation();
+  const { quota, openPaywall } = usePaywall();
   const toast = useToast();
   const isKz = locale === "kk";
+  const isVip = Boolean(quota?.priority_booking || quota?.plan === "premium" || quota?.plan === "vip");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
 
   // Mode: "choice" (initial dual view) | "internal" (booking form) | "success"
   const [step, setStep] = useState<"choice" | "internal" | "success">("choice");
@@ -156,11 +176,11 @@ export function DualBookingModal({
     }
   };
 
-  if (!isOpen) return null;
+  if (!mounted || !isOpen) return null;
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
@@ -270,8 +290,50 @@ export function DualBookingModal({
                 >
                   ← {isKz ? "Артқа" : "Назад к выбору"}
                 </button>
-                <span className="text-xs font-semibold text-slate-400">MedService Direct</span>
+                <div className="flex items-center gap-1.5">
+                  {isVip ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-xs">
+                      <Crown className="w-3 h-3 text-amber-100" />
+                      {isKz ? "VIP Басымдық кезегі" : "VIP Приоритет в очереди"}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-400">MedService Direct</span>
+                  )}
+                </div>
               </div>
+
+              {/* VIP Priority Badge or Upgrade Banner */}
+              {isVip ? (
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-50 via-amber-100/60 to-orange-50 border border-amber-200/80 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Crown className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-amber-950">
+                      {isKz ? "Премиум / VIP қолданушы басымдығы" : "Приоритетная VIP-запись активна"}
+                    </p>
+                    <p className="text-[11px] text-amber-800">
+                      {isKz ? "Сіздің өтініміңіз дәрігер мен клиника панелінде ең жоғарғы орында тұрады." : "Ваша заявка автоматически закрепляется на самом верху очереди клиники."}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Crown className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="text-[11px] text-slate-600 truncate">
+                      {isKz ? "Кезексіз VIP жазылу мүмкіндігі" : "Хотите приоритет в очереди врача?"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openPaywall()}
+                    className="text-[11px] font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg shrink-0 transition-colors"
+                  >
+                    {isKz ? "VIP қосу" : "VIP Тариф"}
+                  </button>
+                </div>
+              )}
 
               {/* Doctor Selector */}
               {doctors.length > 0 && (
@@ -506,6 +568,7 @@ export function DualBookingModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

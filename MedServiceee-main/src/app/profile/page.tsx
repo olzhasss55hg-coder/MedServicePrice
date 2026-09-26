@@ -1,27 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, Crown, Loader2, Star, CheckCircle2, ShieldCheck, Tag } from "lucide-react";
+import { CalendarDays, Crown, Loader2, Star, CheckCircle2, ShieldCheck, Tag, Search, Zap, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { API_URL, api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/ToastContext";
 import { useTranslation } from "@/i18n/LanguageContext";
+import { usePaywall } from "@/components/PaywallContext";
 import type { Booking } from "@/lib/types";
 
 interface Account {
   email: string;
   full_name?: string | null;
-  plan: "free" | "pro" | "premium";
+  plan: "free" | "standard" | "premium" | "pro" | "vip";
   ai_requests_used: number;
   ai_limit?: number | null;
+  search_requests_used?: number;
+  search_limit?: number | null;
+  is_unlimited_search?: boolean;
   priority_booking: boolean;
 }
 
 export default function ProfilePage() {
   const router = useRouter();
   const toast = useToast();
+  const { openPaywall, refreshQuota } = usePaywall();
   const { locale } = useTranslation();
   const isKz = locale === "kk";
 
@@ -31,11 +36,12 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [upgrading, setUpgrading] = useState(false);
 
-  const upgradePlan = async (plan: "pro" | "premium") => {
+  const upgradePlan = async (plan: "standard" | "premium" | "free") => {
     setUpgrading(true);
     try {
       const res = await api.upgradePlan(plan);
-      setAccount((prev) => prev ? { ...prev, plan: res.plan as any } : null);
+      setAccount((prev) => prev ? { ...prev, plan: res.plan as any, priority_booking: !!res.priority_booking, is_unlimited_search: !!res.is_unlimited_search } : null);
+      void refreshQuota();
       toast.success(isKz ? `Тариф сәтті жаңартылды: ${plan.toUpperCase()}` : `Тариф успешно обновлен до ${plan.toUpperCase()}`);
     } catch (err: any) {
       toast.error(err.message || "Ошибка обновления тарифа");
@@ -82,28 +88,46 @@ export default function ProfilePage() {
     );
   }
 
+  const isUnlimited = account.is_unlimited_search || account.plan === "standard" || account.plan === "premium" || account.plan === "pro" || account.plan === "vip";
+  const isVip = account.priority_booking || account.plan === "premium" || account.plan === "vip";
+
   return (
     <div className="container mx-auto max-w-[1100px] px-4 py-8 pb-24 font-sans">
       
       {/* Header */}
-      <div className="mb-8">
-        <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">
-          {isKz ? "Жеке кабинет" : "Личный кабинет"}
-        </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-extrabold text-slate-900">{account.full_name || account.email}</h1>
-          {account.plan === "premium" && (
-            <span className="inline-flex items-center gap-1 bg-amber-500 text-slate-950 text-xs font-extrabold px-3 py-1 rounded-full shadow-sm">
-              <Crown className="w-3.5 h-3.5" /> PREMIUM · {isKz ? "Басымдықты жазылу" : "Приоритетная запись"}
-            </span>
-          )}
-          {account.plan === "pro" && (
-            <span className="inline-flex items-center gap-1 bg-teal-600 text-white text-xs font-extrabold px-3 py-1 rounded-full shadow-sm">
-              PRO · {isKz ? "Шексіз AI" : "Безлимитный AI"}
-            </span>
-          )}
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">
+            {isKz ? "Жеке кабинет" : "Личный кабинет"}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-extrabold text-slate-900">{account.full_name || account.email}</h1>
+            {isVip && (
+              <span className="inline-flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 text-xs font-black px-3.5 py-1 rounded-full shadow-md shadow-amber-500/20">
+                <Crown className="w-3.5 h-3.5 fill-slate-950 text-slate-950" /> PREMIUM VIP · {isKz ? "Басымдықты кезек" : "Приоритетная запись"}
+              </span>
+            )}
+            {!isVip && isUnlimited && (
+              <span className="inline-flex items-center gap-1 bg-teal-600 text-white text-xs font-extrabold px-3 py-1 rounded-full shadow-sm">
+                <Zap className="w-3.5 h-3.5" /> STANDARD · {isKz ? "Шексіз іздеу" : "Безлимитный поиск"}
+              </span>
+            )}
+            {!isUnlimited && (
+              <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-xs font-bold px-3 py-1 rounded-full border border-slate-200">
+                FREE · {isKz ? "20 тегін іздеу" : "20 бесплатных поисков"}
+              </span>
+            )}
+          </div>
+          <p className="text-slate-500 text-sm mt-1">{account.email}</p>
         </div>
-        <p className="text-slate-500 text-sm mt-1">{account.email}</p>
+
+        <Button
+          onClick={() => openPaywall("manual")}
+          className="rounded-2xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-600 text-white font-bold text-xs shadow-md shadow-teal-600/20 h-11 px-5"
+        >
+          <Sparkles className="w-4 h-4 mr-1.5" />
+          {isKz ? "Тарифтерді салыстыру" : "Сравнить тарифы"}
+        </Button>
       </div>
 
       {/* Tier & Quota Cards */}
@@ -112,51 +136,80 @@ export default function ProfilePage() {
         {/* Plan card */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">{isKz ? "Тариф жоспары" : "Текущий тариф"}</p>
-            <p className="text-2xl font-black text-slate-900 uppercase">{account.plan}</p>
-            <p className="text-xs text-slate-500 mt-1">
-              {account.plan === "free" ? (isKz ? "20 AI сұрау лимиті бар" : "Бесплатный лимит 20 AI-запросов") : (isKz ? "Шексіз AI көмекшісі" : "Безлимитный AI-ассистент")}
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs uppercase font-bold tracking-wider text-slate-400">{isKz ? "Тариф жоспары" : "Текущий тариф"}</p>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                {account.plan.toUpperCase()}
+              </span>
+            </div>
+            <p className="text-2xl font-black text-slate-900">
+              {account.plan === "premium" || account.plan === "vip" ? "PREMIUM VIP" : (account.plan === "standard" || account.plan === "pro" ? "STANDARD" : "FREE TIER")}
+            </p>
+            <p className="text-xs text-slate-500 mt-2">
+              {account.plan === "premium" || account.plan === "vip"
+                ? (isKz ? "⭐ Дәрігер кезегінде ең бірінші + Шексіз іздеу" : "⭐ Запись на самом верху очереди + Безлимитный поиск")
+                : account.plan === "standard" || account.plan === "pro"
+                ? (isKz ? "Шексіз іздеу және толық каталог" : "Безлимитный поиск без ограничений")
+                : (isKz ? "20 тегін іздеу лимиті бар" : "Базовый лимит 20 бесплатных поисков")}
             </p>
           </div>
           <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
-            {account.plan !== "pro" && (
-              <Button size="sm" variant="outline" disabled={upgrading} onClick={() => upgradePlan("pro")} className="flex-1 text-xs font-bold rounded-xl">
-                Pro (2 990 ₸)
+            {account.plan !== "standard" && (
+              <Button size="sm" variant="outline" disabled={upgrading} onClick={() => upgradePlan("standard")} className="flex-1 text-xs font-bold rounded-xl border-teal-200 text-teal-700 hover:bg-teal-50">
+                Standard (1 990 ₸)
               </Button>
             )}
             {account.plan !== "premium" && (
-              <Button size="sm" disabled={upgrading} onClick={() => upgradePlan("premium")} className="flex-1 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl">
-                Premium (7 990 ₸)
+              <Button size="sm" disabled={upgrading} onClick={() => upgradePlan("premium")} className="flex-1 text-xs font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl shadow-md shadow-amber-500/20">
+                Premium VIP (4 990 ₸)
               </Button>
             )}
           </div>
         </div>
 
-        {/* AI Usage */}
+        {/* Search Usage Quota */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">{isKz ? "AI сұраулар" : "AI-запросы"}</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs uppercase font-bold tracking-wider text-slate-400">{isKz ? "Іздеу лимиті" : "Лимит поиска"}</p>
+              <Search className="w-4 h-4 text-slate-400" />
+            </div>
             <p className="text-2xl font-black text-teal-600">
-              {account.ai_limit == null ? "∞ (Шексіз)" : `${account.ai_requests_used} / ${account.ai_limit}`}
+              {isUnlimited ? "∞ (Шексіз)" : `${account.search_requests_used || 0} / 20`}
             </p>
-            <p className="text-xs text-slate-500 mt-1">
-              {isKz ? "Медициналық триаж және іздеу" : "Консультации и подбор клиник"}
+            <p className="text-xs text-slate-500 mt-2">
+              {isUnlimited
+                ? (isKz ? "Шектеусіз каталог іздеулері" : "Неограниченный поиск по услугам и клиникам")
+                : (isKz ? `Қалған тегін іздеулер: ${Math.max(0, 20 - (account.search_requests_used || 0))}` : `Осталось поисков: ${Math.max(0, 20 - (account.search_requests_used || 0))}`)}
             </p>
           </div>
+          {!isUnlimited && (
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${((account.search_requests_used || 0) >= 18) ? 'bg-rose-500' : ((account.search_requests_used || 0) >= 10) ? 'bg-amber-500' : 'bg-teal-500'}`}
+                  style={{ width: `${Math.min(100, ((account.search_requests_used || 0) / 20) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Total Bookings */}
+        {/* Total Bookings & VIP Status */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">{isKz ? "Жазылулар саны" : "Всего записей"}</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs uppercase font-bold tracking-wider text-slate-400">{isKz ? "Жазылулар саны" : "Всего записей"}</p>
+              <CalendarDays className="w-4 h-4 text-slate-400" />
+            </div>
             <p className="text-2xl font-black text-slate-900">{bookings.length}</p>
-            <p className="text-xs text-slate-500 mt-1">
-              {isKz ? "Белсенді және аяқталған" : "Активные и завершенные"}
+            <p className="text-xs text-slate-500 mt-2">
+              {isVip
+                ? (isKz ? "⭐ Барлық жазылулар VIP басымдықты болып барады" : "⭐ Все записи отправляются с VIP-приоритетом")
+                : (isKz ? "Белсенді және аяқталған жазылулар" : "Активные и завершенные приёмы")}
             </p>
           </div>
         </div>
-      </div>
-
       {/* Bookings List (Module 6) */}
       <section className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-200 flex items-center justify-between">

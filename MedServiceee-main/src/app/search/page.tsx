@@ -1,18 +1,16 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 import { useState, useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { Search, SlidersHorizontal, MapPin, Star, Loader2, ArrowRight, Heart } from "lucide-react"
+import { Search, SlidersHorizontal, MapPin, Star, Loader2, ArrowRight, Heart, X, Check, Lock, Crown, Zap, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { ClinicCard } from "@/components/ClinicCard"
 import { useTranslation } from "@/i18n/LanguageContext"
-import { API_URL } from "@/lib/api"
+import { API_URL, getSearchSessionId } from "@/lib/api"
+import { usePaywall } from "@/components/PaywallContext"
 
 interface Clinic {
   id: string
@@ -47,12 +45,16 @@ function SearchPageContent() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams()
   const router = useRouter()
+  const { quota, openPaywall, refreshQuota } = usePaywall();
+  const isKz = locale === "kk";
+
   const initialQuery = searchParams.get("q") || ""
   const initialCity = searchParams.get("city") || "Алматы"
 
   const [searchQuery, setSearchQuery] = useState(initialQuery)
   const [city, setCity] = useState(initialCity)
   const [results, setResults] = useState<SearchResult[]>([])
+  const [limitBlocked, setLimitBlocked] = useState(false)
   const [favorites, setFavorites] = useState<Record<string, SearchResult>>(() => {
     if (typeof window === "undefined") return {}
     const saved = localStorage.getItem("favorites")
@@ -90,6 +92,7 @@ function SearchPageContent() {
   const [language, setLanguage] = useState("")
   const [hasPromotion, setHasPromotion] = useState<boolean | null>(null)
   const [sortBy, setSortBy] = useState<string>("")
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -105,6 +108,8 @@ function SearchPageContent() {
   const fetchResults = async (q: string, c: string, minR: number | null, onB: boolean | null, sBy: string, minP: number | null, maxP: number | null, selectedSpecialty: string, selectedLanguage: string, selectedPromotion: boolean | null) => {
     setLoading(true)
     setError("")
+    const sessionId = getSearchSessionId()
+
     try {
       let url = `${API_URL}/api/search?city=${encodeURIComponent(c || "Алматы")}`
       if (q && q.trim().length > 0) {
@@ -119,12 +124,38 @@ function SearchPageContent() {
       if (selectedLanguage) url += `&language=${encodeURIComponent(selectedLanguage)}`
       if (selectedPromotion !== null) url += `&has_promotion=${selectedPromotion}`
 
-      const res = await fetch(url)
+      const res = await fetch(url, {
+        headers: {
+          "X-Search-Session": sessionId,
+        },
+        credentials: "include",
+      })
+
+      if (res.status === 402) {
+        setLimitBlocked(true)
+        setResults([])
+        openPaywall("limit_reached")
+        void refreshQuota()
+        return
+      }
+
       if (!res.ok) {
         throw new Error("Ошибка при поиске")
       }
+
+      const rem = res.headers.get("X-Search-Remaining")
+      const unlim = res.headers.get("X-Search-Unlimited")
+      if (unlim === "true") {
+        setLimitBlocked(false)
+      } else if (rem !== null && parseInt(rem, 10) <= 0) {
+        setLimitBlocked(true)
+      } else {
+        setLimitBlocked(false)
+      }
+
       const data = await res.json()
       setResults(data)
+      void refreshQuota()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка")
     } finally {
@@ -140,6 +171,10 @@ function SearchPageContent() {
   }, [searchQuery, city, minRating, onlineBooking, sortBy, minPrice, maxPrice, specialty, language, hasPromotion])
 
   const handleSearch = () => {
+    if (limitBlocked || (quota && !quota.is_unlimited && quota.search_limit !== null && quota.searches_used >= quota.search_limit)) {
+      openPaywall("limit_reached")
+      return
+    }
     router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}&city=${encodeURIComponent(city)}`)
   }
 
@@ -161,19 +196,149 @@ function SearchPageContent() {
       <div className="container mx-auto max-w-[1440px] px-4">
 
         {/* Mobile Search & Filter Toggle */}
-        <div className="lg:hidden flex gap-2 mb-6">
-          <Input
-            placeholder={t('search.searchPlaceholder')}
-            icon={<Search className="w-5 h-5" />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="h-12 flex-1 bg-white"
-          />
-          <Button variant="outline" size="icon" className="h-12 w-12 shrink-0 bg-white" onClick={() => handleSearch()}>
-            <Search className="w-5 h-5" />
-          </Button>
+        <div className="lg:hidden mb-4">
+          <div className="flex items-center justify-between mb-2">
+            {quota?.is_unlimited ? (
+              <button
+                onClick={() => openPaywall("manual")}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-teal-50 border border-teal-200 text-teal-700 shadow-sm"
+              >
+                <Zap className="w-3.5 h-3.5 text-teal-600" />
+                <span>{quota.plan === "premium" || quota.plan === "vip" ? "⭐ VIP Тариф (Шексіз іздеу)" : "⚡ Standard (Шексіз іздеу)"}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => openPaywall("manual")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-sm ${
+                  (quota?.searches_used || 0) >= 18
+                    ? "bg-rose-50 border-rose-200 text-rose-700"
+                    : (quota?.searches_used || 0) >= 10
+                    ? "bg-amber-50 border-amber-200 text-amber-700"
+                    : "bg-slate-100 border-slate-200 text-slate-700"
+                }`}
+              >
+                <Search className="w-3.5 h-3.5 text-primary" />
+                <span>{isKz ? `Тегін іздеу лимиті: ${quota?.searches_used || 0}/20` : `Бесплатный поиск: ${quota?.searches_used || 0}/20`}</span>
+                <span className="text-[10px] uppercase underline text-primary ml-1">{isKz ? "Тарифтер" : "Тарифы"}</span>
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder={t('search.searchPlaceholder')}
+              icon={<Search className="w-5 h-5" />}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="h-12 flex-1 bg-white shadow-sm"
+            />
+            <Button variant="outline" size="icon" className="h-12 w-12 shrink-0 bg-white shadow-sm" onClick={() => handleSearch()}>
+              <Search className="w-5 h-5" />
+            </Button>
+            <Button 
+              variant="outline" 
+              className="h-12 px-3 bg-white shrink-0 flex items-center gap-1.5 border-primary/30 text-primary font-bold shadow-sm" 
+              onClick={() => setMobileFiltersOpen(true)}
+            >
+              <SlidersHorizontal className="w-4 h-4 text-primary" />
+              <span className="text-xs">{t('search.filters')}</span>
+            </Button>
+          </div>
         </div>
+
+        {/* Mobile Filter Drawer / Modal */}
+        {mobileFiltersOpen && (
+          <div className="fixed inset-0 z-[200] lg:hidden flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm animate-in fade-in" onClick={() => setMobileFiltersOpen(false)}>
+            <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[85vh] overflow-y-auto p-6 shadow-2xl border border-slate-100 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal className="w-5 h-5 text-primary" />
+                  <h3 className="font-bold text-lg text-slate-900">{t('search.filters')}</h3>
+                </div>
+                <button onClick={() => setMobileFiltersOpen(false)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* City Selection */}
+              <div className="space-y-2 mb-5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('search.city')}</label>
+                <select
+                  value={city}
+                  onChange={(e) => {
+                    setCity(e.target.value);
+                    router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}&city=${encodeURIComponent(e.target.value)}`);
+                  }}
+                  className="w-full h-11 bg-slate-100 rounded-xl px-3 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="Алматы">{locale === 'kk' ? 'Алматы' : 'Алматы'}</option>
+                  <option value="Астана">{locale === 'kk' ? 'Астана' : 'Астана'}</option>
+                  <option value="Шымкент">{locale === 'kk' ? 'Шымкент' : 'Шымкент'}</option>
+                  <option value={locale === 'kk' ? 'Қарағанды' : 'Караганда'}>{locale === 'kk' ? 'Қарағанды' : 'Караганда'}</option>
+                  <option value="Павлодар">{locale === 'kk' ? 'Павлодар' : 'Павлодар'}</option>
+                  <option value={locale === 'kk' ? 'Ақтөбе' : 'Актобе'}>{locale === 'kk' ? 'Ақтөбе' : 'Актобе'}</option>
+                </select>
+              </div>
+
+              {/* Price Filter */}
+              <div className="space-y-2 mb-5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('search.price')} (₸)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder={t('search.priceFrom')}
+                    value={minPriceInput}
+                    onChange={(e) => setMinPriceInput(e.target.value)}
+                    className="w-full bg-slate-100 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <input
+                    type="number"
+                    placeholder={t('search.priceTo')}
+                    value={maxPriceInput}
+                    onChange={(e) => setMaxPriceInput(e.target.value)}
+                    className="w-full bg-slate-100 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              {/* Rating */}
+              <div className="space-y-2 mb-5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('search.rating')}</label>
+                <select
+                  value={minRating || ""}
+                  onChange={(e) => setMinRating(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full h-11 bg-slate-100 rounded-xl px-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">{t('search.anyRating')}</option>
+                  <option value="4.5">⭐ 4.5+</option>
+                  <option value="4.0">⭐ 4.0+</option>
+                  <option value="3.5">⭐ 3.5+</option>
+                </select>
+              </div>
+
+              {/* Online Booking Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 mb-5">
+                <span className="text-sm font-semibold text-slate-700">{locale === 'kk' ? 'Тек онлайн-жазылу бар клиникалар' : 'Только с онлайн-записью'}</span>
+                <input
+                  type="checkbox"
+                  checked={onlineBooking === true}
+                  onChange={(e) => setOnlineBooking(e.target.checked ? true : null)}
+                  className="w-5 h-5 rounded text-primary focus:ring-primary"
+                />
+              </div>
+
+              <Button
+                className="w-full h-12 rounded-2xl bg-primary text-white font-bold shadow-md shadow-primary/25"
+                onClick={() => {
+                  applyPriceFilter();
+                  setMobileFiltersOpen(false);
+                }}
+              >
+                {t('search.apply')}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Mobile Categories Scroll */}
         <div className="lg:hidden overflow-x-auto pb-4 mb-2 -mx-4 px-4 flex gap-2 scrollbar-hide">
@@ -218,12 +383,12 @@ function SearchPageContent() {
                     }}
                     className="w-full h-full bg-transparent pl-9 pr-8 appearance-none border-none outline-none text-sm font-medium cursor-pointer"
                   >
-                    <option value="Алматы">Алматы</option>
-                    <option value="Астана">Астана</option>
-                    <option value="Шымкент">Шымкент</option>
-                    <option value="Қарағанды">Қарағанды / Караганда</option>
-                    <option value="Ақтөбе">Ақтөбе / Актобе</option>
-                    <option value="Павлодар">Павлодар</option>
+                    <option value="Алматы">{locale === 'kk' ? 'Алматы' : 'Алматы'}</option>
+                    <option value="Астана">{locale === 'kk' ? 'Астана' : 'Астана'}</option>
+                    <option value="Шымкент">{locale === 'kk' ? 'Шымкент' : 'Шымкент'}</option>
+                    <option value={locale === 'kk' ? 'Қарағанды' : 'Караганда'}>{locale === 'kk' ? 'Қарағанды' : 'Караганда'}</option>
+                    <option value="Павлодар">{locale === 'kk' ? 'Павлодар' : 'Павлодар'}</option>
+                    <option value={locale === 'kk' ? 'Ақтөбе' : 'Актобе'}>{locale === 'kk' ? 'Ақтөбе' : 'Актобе'}</option>
                   </select>
                   <svg className="w-4 h-4 text-muted-foreground absolute right-3 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                 </div>
@@ -338,6 +503,35 @@ function SearchPageContent() {
           {/* Main Content */}
           <main className="flex-1">
             <div className="hidden lg:block mb-6">
+              <div className="flex items-center justify-between mb-2">
+                {quota?.is_unlimited ? (
+                  <button
+                    onClick={() => openPaywall("manual")}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 transition-colors shadow-sm"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-teal-600" />
+                    <span>{quota.plan === "premium" || quota.plan === "vip" ? "⭐ VIP Тариф (Шексіз іздеу & Приоритет)" : "⚡ Standard (Шексіз іздеу)"}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => openPaywall("manual")}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-colors shadow-sm ${
+                      (quota?.searches_used || 0) >= 18
+                        ? "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                        : (quota?.searches_used || 0) >= 10
+                        ? "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
+                        : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <Search className="w-3.5 h-3.5 text-primary" />
+                    <span>{isKz ? `Тегін іздеу лимиті: ${quota?.searches_used || 0}/20` : `Бесплатный поиск: ${quota?.searches_used || 0}/20`}</span>
+                    <span className="text-[10px] uppercase font-bold text-primary ml-1 underline">{isKz ? "Тарифті таңдау" : "Тарифы"}</span>
+                  </button>
+                )}
+                <span className="text-xs text-slate-400">
+                  {quota?.is_unlimited ? (isKz ? "Шектеусіз іздеу режимі" : "Безлимитный режим поиска") : (isKz ? "20 сұраныстан кейін Standard/VIP қажет" : "После 20 поисков требуется Standard/VIP")}
+                </span>
+              </div>
               <div className="flex gap-2">
                 <div className="flex-1">
                   <Input
@@ -355,7 +549,7 @@ function SearchPageContent() {
 
             <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
               <h1 className="text-2xl font-bold text-foreground">
-                {locale === 'en' ? 'Search Results' : (locale === 'kk' ? 'Іздеу нәтижелері' : 'Результаты поиска')} {initialQuery && (locale === 'en' ? `for "${initialQuery}"` : (locale === 'kk' ? `«${initialQuery}» бойынша` : `по запросу «${initialQuery}»`))} <span className="text-muted-foreground font-normal text-lg">({filteredResults.length})</span>
+                {locale === 'en' ? 'Search Results' : (locale === 'kk' ? 'Іздеу нәтижелері' : 'Результаты поиска')} {initialQuery && (locale === 'en' ? `for "${initialQuery}"` : (locale === 'kk' ? `«${initialQuery}» бойынша` : `по запросу «${initialQuery}»`))} <span className="text-muted-foreground font-normal text-lg">({limitBlocked ? 0 : filteredResults.length})</span>
               </h1>
 
               {/* Sort By Select */}
@@ -374,7 +568,38 @@ function SearchPageContent() {
               </div>
             </div>
 
-            {loading ? (
+            {limitBlocked ? (
+              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 text-white p-8 sm:p-12 rounded-3xl text-center shadow-2xl border border-slate-800 my-4 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-16 h-16 rounded-3xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto mb-5 text-rose-400">
+                  <Lock className="w-8 h-8" />
+                </div>
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs font-bold uppercase tracking-wider mb-3">
+                  {isKz ? "Лимит 20/20 таусылды" : "Лимит 20/20 исчерпан"}
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-black text-white mb-3">
+                  {t('paywall.limitReachedTitle')}
+                </h3>
+                <p className="text-slate-400 max-w-lg mx-auto text-sm sm:text-base mb-8 leading-relaxed">
+                  {t('paywall.limitReachedSubtitle')}
+                </p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">
+                  <Button
+                    onClick={() => openPaywall("limit_reached")}
+                    className="w-full h-12 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-sm shadow-lg shadow-teal-600/30 flex items-center justify-center gap-2"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Standard (1 990 ₸)</span>
+                  </Button>
+                  <Button
+                    onClick={() => openPaywall("limit_reached")}
+                    className="w-full h-12 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2"
+                  >
+                    <Crown className="w-4 h-4" />
+                    <span>Premium VIP (4 990 ₸)</span>
+                  </Button>
+                </div>
+              </div>
+            ) : loading ? (
               <div className="flex justify-center items-center py-20">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
               </div>
@@ -393,7 +618,7 @@ function SearchPageContent() {
                     className="bg-white rounded-3xl p-6 shadow-sm border border-black/5 hover:border-primary/20 transition-all"
                   >
                     <div className="mb-6 border-b border-black/5 pb-4">
-                      <div className="flex justify-between items-start">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                         <div>
                           <div className="flex items-center gap-3 mb-2">
                             <span className="text-xs font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-1 rounded-md inline-block">
@@ -406,11 +631,11 @@ function SearchPageContent() {
                               <Heart className={`w-4 h-4 ${favorites[result.service.id] ? 'fill-rose-500 text-rose-500' : ''}`} />
                             </button>
                           </div>
-                          <h2 className="text-2xl font-bold mt-1">{result.service.name_raw}</h2>
+                          <h2 className="text-xl sm:text-2xl font-bold mt-1 text-slate-900 leading-snug">{result.service.name_raw}</h2>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm text-muted-foreground">{t('search.averagePrice')}</p>
-                          <p className="font-medium text-lg">~{Math.round(result.avg_price).toLocaleString('ru-RU')} ₸</p>
+                        <div className="text-left sm:text-right mt-1 sm:mt-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground">{t('search.averagePrice')}</p>
+                          <p className="font-extrabold text-base sm:text-lg text-slate-900">~{Math.round(result.avg_price).toLocaleString('ru-RU')} ₸</p>
                         </div>
                       </div>
                     </div>

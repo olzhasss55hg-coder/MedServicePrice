@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { 
   X, Star, Clock, Award, Check, User, ShieldCheck, Tag, 
@@ -22,6 +23,22 @@ export function DoctorProfileModal({ doctor, isOpen, onClose }: DoctorModalProps
   const { locale } = useTranslation();
   const toast = useToast();
   const isKz = locale === "kk";
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
 
   const [isBooked, setIsBooked] = useState(false);
   const [bookingRefId, setBookingRefId] = useState("");
@@ -173,14 +190,14 @@ export function DoctorProfileModal({ doctor, isOpen, onClose }: DoctorModalProps
     }
   };
 
-  if (!isOpen || !doctor) return null;
+  if (!mounted || !isOpen || !doctor) return null;
 
   const basePrice = doctor.consultation_price || doctor.price || 0;
   const finalPrice = promoValidation ? promoValidation.total_amount : basePrice;
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 md:p-6 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200" 
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200" 
       onClick={handleClose}
     >
       <div 
@@ -550,6 +567,7 @@ export function DoctorProfileModal({ doctor, isOpen, onClose }: DoctorModalProps
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -13,15 +13,37 @@ import {
   SearchResult,
   SymptomCheckResponse,
   UserPlan,
+  SearchQuota,
 } from './types';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+export function getSearchSessionId(): string {
+  if (typeof window === 'undefined') return 'server-session';
+  let sessionId = localStorage.getItem('medservice_search_session');
+  if (!sessionId) {
+    sessionId = `guest_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+    localStorage.setItem('medservice_search_session', sessionId);
+  }
+  return sessionId;
+}
+
+export class SearchLimitExceededError extends Error {
+  quota?: SearchQuota;
+  constructor(message: string, quota?: SearchQuota) {
+    super(message);
+    this.name = 'SearchLimitExceededError';
+    this.quota = quota;
+  }
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const sessionId = getSearchSessionId();
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'X-Search-Session': sessionId,
       ...options?.headers,
     },
     credentials: 'include',
@@ -29,12 +51,21 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     let errorDetail = `Request failed with status ${res.status}`;
+    let parsedData: any = null;
     try {
-      const data = await res.json();
-      if (data.detail) {
-        errorDetail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      parsedData = await res.json();
+      if (parsedData.detail) {
+        errorDetail = typeof parsedData.detail === 'string' ? parsedData.detail : JSON.stringify(parsedData.detail);
       }
     } catch {}
+
+    if (res.status === 402 || (parsedData?.detail && parsedData.detail.limit_reached)) {
+      const msg = typeof parsedData?.detail?.message === 'string'
+        ? parsedData.detail.message
+        : 'Тегін іздеу лимиті (20) таусылды. Шексіз іздеу үшін тарифті таңдаңыз.';
+      throw new SearchLimitExceededError(msg, parsedData?.detail);
+    }
+
     throw new Error(errorDetail);
   }
 
@@ -157,8 +188,12 @@ export const api = {
     return fetchJson<UserPlan>(`${API_URL}/api/subscriptions/plan`);
   },
 
-  upgradePlan: (plan: 'pro' | 'premium') => {
-    return fetchJson<{ status: string; message: string; plan: string }>(`${API_URL}/api/payment/checkout`, {
+  getSearchQuota: () => {
+    return fetchJson<SearchQuota>(`${API_URL}/api/search/quota`);
+  },
+
+  upgradePlan: (plan: 'standard' | 'premium' | 'pro' | 'vip' | 'free') => {
+    return fetchJson<{ status: string; message: string; plan: string; priority_booking?: boolean; is_unlimited_search?: boolean }>(`${API_URL}/api/payment/checkout`, {
       method: 'POST',
       body: JSON.stringify({ plan }),
     });

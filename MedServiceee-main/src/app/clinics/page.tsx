@@ -13,26 +13,55 @@ import { API_URL, api } from "@/lib/api";
 import type { Clinic, Doctor } from "@/lib/types";
 import { build2GisRouteUrl, buildGoogleMapsRouteUrl } from "@/lib/maps";
 
-const CITIES = ["Астана", "Алматы", "Шымкент", "Қарағанды", "Павлодар", "Ақтөбе"];
+interface CityOption {
+  id: string;
+  name_ru: string;
+  name_kk: string;
+}
 
-const DISTRICTS_MAP: Record<string, string[]> = {
+const CITIES: CityOption[] = [
+  { id: "Астана", name_ru: "Астана", name_kk: "Астана" },
+  { id: "Алматы", name_ru: "Алматы", name_kk: "Алматы" },
+  { id: "Шымкент", name_ru: "Шымкент", name_kk: "Шымкент" },
+  { id: "Караганда", name_ru: "Караганда", name_kk: "Қарағанды" },
+  { id: "Павлодар", name_ru: "Павлодар", name_kk: "Павлодар" },
+  { id: "Актобе", name_ru: "Актобе", name_kk: "Ақтөбе" },
+];
+
+const DISTRICTS_MAP_RU: Record<string, string[]> = {
+  "Астана": ["Есильский район", "Алматинский район", "Байконурский район", "Сарыаркинский район", "Нуринский район"],
+  "Алматы": ["Алмалинский район", "Бостандыкский район", "Медеуский район", "Ауэзовский район", "Турксибский район", "Жетысуский район"],
+  "Шымкент": ["Аль-Фарабийский район", "Абайский район", "Енбекшинский район", "Каратауский район"],
+  "Караганда": ["Район Казыбек би", "Район Алихана Бокейхана"],
+  "Павлодар": ["Центр", "Усолка", "Химгородки"],
+  "Актобе": ["Центр", "12 мкр", "Батыс-2", "Шанхай"]
+};
+
+const DISTRICTS_MAP_KK: Record<string, string[]> = {
   "Астана": ["Есіл ауданы", "Алматы ауданы", "Байқоңыр ауданы", "Сарыарқа ауданы", "Нұра ауданы"],
   "Алматы": ["Алмалы ауданы", "Бостандық ауданы", "Медеу ауданы", "Әуезов ауданы", "Түрксіб ауданы", "Жетісу ауданы"],
   "Шымкент": ["Әл-Фараби ауданы", "Абай ауданы", "Еңбекші ауданы", "Қаратау ауданы"],
-  "Қарағанды": ["Қазыбек би ауданы", "Әлихан Бөкейхан ауданы"],
+  "Караганда": ["Қазыбек би ауданы", "Әлихан Бөкейхан ауданы"],
   "Павлодар": ["Орталық", "Усолка", "Химгородки"],
-  "Ақтөбе": ["Орталық", "12 мкр", "Батыс-2", "Шанхай"]
+  "Актобе": ["Орталық", "12 мкр", "Батыс-2", "Шанхай"]
 };
+
+function normalizeCityId(val: string): string {
+  if (val === "Қарағанды") return "Караганда";
+  if (val === "Ақтөбе") return "Актобе";
+  return val;
+}
 
 function ClinicsContent() {
   const { t, locale } = useTranslation();
   const isKz = locale === "kk";
   const searchParams = useSearchParams();
-  const initialCity = searchParams.get("city") || "Астана";
+  const rawCity = searchParams.get("city") || "Астана";
+  const initialCity = normalizeCityId(rawCity);
 
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCity, setSelectedCity] = useState(CITIES.includes(initialCity) ? initialCity : "Астана");
+  const [selectedCity, setSelectedCity] = useState(initialCity);
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const [clinicQuery, setClinicQuery] = useState("");
   const [minRating, setMinRating] = useState(0);
@@ -46,8 +75,11 @@ function ClinicsContent() {
 
   useEffect(() => {
     const qCity = searchParams.get("city");
-    if (qCity && CITIES.includes(qCity) && qCity !== selectedCity) {
-      setSelectedCity(qCity);
+    if (qCity) {
+      const norm = normalizeCityId(qCity);
+      if (norm !== selectedCity) {
+        setSelectedCity(norm);
+      }
     }
   }, [searchParams]);
 
@@ -99,7 +131,9 @@ function ClinicsContent() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const districts = DISTRICTS_MAP[selectedCity] || [];
+  const currentCityObj = CITIES.find(c => c.id === selectedCity) || CITIES[0];
+  const currentCityLabel = isKz ? currentCityObj.name_kk : currentCityObj.name_ru;
+  const districts = (isKz ? DISTRICTS_MAP_KK[selectedCity] : DISTRICTS_MAP_RU[selectedCity]) || [];
 
   return (
     <div className="container mx-auto max-w-[1440px] px-4 py-8 font-sans">
@@ -115,25 +149,29 @@ function ClinicsContent() {
         </div>
 
         {/* City Filter Tabs */}
-        <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200 w-fit">
-          {CITIES.map((city) => (
-            <button
-              key={city}
-              type="button"
-              onClick={() => {
-                setSelectedCity(city);
-                setSelectedDistrict("");
-                setSelectedClinicId(null);
-              }}
-              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
-                selectedCity === city
-                  ? "bg-primary text-white shadow-md shadow-primary/25"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
-              }`}
-            >
-              📍 {city}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200 overflow-x-auto max-w-full scrollbar-hide w-fit">
+          {CITIES.map((cityObj) => {
+            const cityName = isKz ? cityObj.name_kk : cityObj.name_ru;
+            const isSelected = selectedCity === cityObj.id;
+            return (
+              <button
+                key={cityObj.id}
+                type="button"
+                onClick={() => {
+                  setSelectedCity(cityObj.id);
+                  setSelectedDistrict("");
+                  setSelectedClinicId(null);
+                }}
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all shrink-0 ${
+                  isSelected
+                    ? "bg-primary text-white shadow-md shadow-primary/25"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+                }`}
+              >
+                📍 {cityName}
+              </button>
+            );
+          })}
         </div>
 
         {/* Search & Filters Bar */}
@@ -187,7 +225,7 @@ function ClinicsContent() {
         <div className="lg:col-span-6 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-800">
-              {isKz ? `${selectedCity} клиникалары` : `Клиники в г. ${selectedCity}`} 
+              {isKz ? `${currentCityLabel} клиникалары` : `Клиники в г. ${currentCityLabel}`} 
               <span className="ml-2 text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">
                 {clinics.length}
               </span>
@@ -347,7 +385,7 @@ function ClinicsContent() {
         </div>
 
         {/* Right Column: Interactive Map */}
-        <div className="lg:col-span-6 sticky top-24 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col h-[720px] p-2">
+        <div className="lg:col-span-6 lg:sticky lg:top-24 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col h-[420px] sm:h-[500px] lg:h-[720px] p-2">
           <DynamicMap
             clinics={clinics}
             selectedClinicId={selectedClinicId}

@@ -24,6 +24,8 @@ ADDITIVE_COLUMNS = {
         "plan": "VARCHAR DEFAULT 'free'",
         "ai_requests_used": "INTEGER DEFAULT 0",
         "ai_usage_period_started_at": "DATETIME",
+        "search_requests_used": "INTEGER DEFAULT 0",
+        "search_usage_period_started_at": "DATETIME",
     },
     "bookings": {
         "patient_id": "VARCHAR",

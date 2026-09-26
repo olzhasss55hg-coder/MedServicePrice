@@ -49,26 +49,43 @@ export default function ComparePage() {
       setLoading(true)
       setError("")
     })
-    fetch(`${API_URL}/api/prices/${serviceId}?city=${encodeURIComponent(city)}`)
-      .then(async res => {
-        if (!res.ok) throw new Error("Не удалось загрузить цены")
-        const data: unknown = await res.json()
-        if (!Array.isArray(data)) throw new Error("Некорректный ответ API цен")
-        return data as Price[]
-      })
-      .then(data => {
-        setPrices(data)
-        if (data.length > 0) {
-          setService(data[0].service)
+
+    async function loadCompareData() {
+      try {
+        const pricesRes = await fetch(`${API_URL}/api/prices/${serviceId}?city=${encodeURIComponent(city)}`)
+        let pricesData: Price[] = []
+        if (pricesRes.ok) {
+          const raw = await pricesRes.json()
+          if (Array.isArray(raw)) {
+            pricesData = raw as Price[]
+          }
         }
-        setLoading(false)
-      })
-      .catch(err => {
+        setPrices(pricesData)
+
+        if (pricesData.length > 0 && pricesData[0].service) {
+          setService(pricesData[0].service)
+        } else {
+          // Fetch service info directly as fallback
+          try {
+            const srvRes = await fetch(`${API_URL}/api/services/${serviceId}`)
+            if (srvRes.ok) {
+              const srvData = await srvRes.json()
+              setService(srvData)
+            }
+          } catch (e) {
+            console.error("Could not fetch service info", e)
+          }
+        }
+      } catch (err) {
         console.error(err)
         setError(err instanceof Error ? err.message : "Не удалось загрузить цены")
         setPrices([])
+      } finally {
         setLoading(false)
-      })
+      }
+    }
+
+    loadCompareData()
   }, [serviceId, city])
 
   const toggleDoctors = async (clinicId: string) => {

@@ -29,8 +29,8 @@ const defaultCenter: [number, number] = [51.169392, 71.449074];
 
 // Official Red/Teal Medical Teardrop Location Pin
 const createOfficialPin = (isSelected: boolean) => {
-  const pinColor = isSelected ? "#0F6FFF" : "#EF4444";
-  const glowColor = isSelected ? "rgba(15, 111, 255, 0.4)" : "rgba(239, 68, 68, 0.35)";
+  const pinColor = isSelected ? "#0d9488" : "#EF4444";
+  const glowColor = isSelected ? "rgba(13, 148, 136, 0.4)" : "rgba(239, 68, 68, 0.35)";
   const size = isSelected ? 46 : 40;
   const width = Math.round(size * 0.75);
 

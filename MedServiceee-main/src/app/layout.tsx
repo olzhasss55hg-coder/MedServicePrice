@@ -8,6 +8,7 @@ import { Footer } from "@/components/layout/Footer";
 import { LanguageProvider } from "@/i18n/LanguageContext";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ToastProvider } from "@/components/ui/ToastContext";
+import { PaywallProvider } from "@/components/PaywallContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -29,14 +30,16 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20">
         <LanguageProvider>
           <ToastProvider>
-            <Navbar />
-            <main className="flex-1 flex flex-col">
-              {children}
-            </main>
-            <AIChatWidget />
-            <CommandPalette />
-            <Footer />
-            <BottomNav />
+            <PaywallProvider>
+              <Navbar />
+              <main className="flex-1 flex flex-col">
+                {children}
+              </main>
+              <AIChatWidget />
+              <CommandPalette />
+              <Footer />
+              <BottomNav />
+            </PaywallProvider>
           </ToastProvider>
         </LanguageProvider>
       </body>

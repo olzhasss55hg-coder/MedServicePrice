@@ -1,32 +1,35 @@
 "use client"
 
 import Link from "next/link"
-import { Search, Heart, User, Menu, LogOut, Network, Command, Stethoscope } from "lucide-react"
+import { Search, Heart, User, Menu, LogOut, Network, Command, Stethoscope, Crown, Zap, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslation } from "@/i18n/LanguageContext"
 import { API_URL } from "@/lib/api"
 import { Badge } from "@/components/ui/Badge"
+import { usePaywall } from "@/components/PaywallContext"
 
 export function Navbar() {
   const { t, locale, setLocale } = useTranslation();
+  const { quota, openPaywall } = usePaywall();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [plan, setPlan] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const router = useRouter();
+  const isKz = locale === "kk";
 
   useEffect(() => {
     const checkAuth = window.setTimeout(async () => {
       try {
         const response = await fetch(`${API_URL}/api/auth/me`, { credentials: "include" });
-         setIsAuthenticated(response.ok);
-         if (response.ok) {
-           const user = await response.json() as { plan?: string };
-           setPlan(user.plan || "free");
-         } else {
-           setPlan(null);
-         }
+        setIsAuthenticated(response.ok);
+        if (response.ok) {
+          const user = await response.json() as { plan?: string };
+          setPlan(user.plan || "free");
+        } else {
+          setPlan(null);
+        }
       } catch {
         setIsAuthenticated(false);
         setPlan(null);
@@ -46,6 +49,8 @@ export function Navbar() {
       router.refresh();
     }
   };
+
+  const activePlan = plan || quota?.plan || "free";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
@@ -76,6 +81,30 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Quick Tariff / Search Quota pill */}
+          <button
+            onClick={() => openPaywall("manual")}
+            className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm hover:scale-105 active:scale-95 bg-white border-slate-200 text-slate-700 hover:border-teal-500/50"
+          >
+            {activePlan === "premium" || activePlan === "vip" ? (
+              <>
+                <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+                <span className="text-amber-700 font-extrabold">PREMIUM VIP</span>
+              </>
+            ) : activePlan === "standard" || activePlan === "pro" ? (
+              <>
+                <Zap className="w-3.5 h-3.5 text-teal-600" />
+                <span className="text-teal-700 font-extrabold">STANDARD</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                <span>{isKz ? `Іздеу: ${quota?.searches_used || 0}/20` : `Поиск: ${quota?.searches_used || 0}/20`}</span>
+                <span className="text-[10px] text-teal-600 uppercase font-extrabold ml-0.5">{isKz ? "Тарифтер" : "Тарифы"}</span>
+              </>
+            )}
+          </button>
+
           <div className="hidden md:flex items-center gap-3 mr-2">
             <button
               type="button"
@@ -125,8 +154,8 @@ export function Navbar() {
                   <User className="w-5 h-5 text-slate-700" />
                 </Button>
               </Link>
-              {plan === "premium" && <Badge variant="ai" className="hidden sm:inline-flex bg-amber-500 text-slate-950 font-bold">PREMIUM</Badge>}
-              {plan === "pro" && <Badge variant="ai" className="hidden sm:inline-flex bg-teal-600 text-white font-bold">PRO</Badge>}
+              {(activePlan === "premium" || activePlan === "vip") && <Badge variant="ai" className="hidden sm:inline-flex bg-amber-500 text-slate-950 font-bold">VIP</Badge>}
+              {(activePlan === "standard" || activePlan === "pro") && <Badge variant="ai" className="hidden sm:inline-flex bg-teal-600 text-white font-bold">STANDARD</Badge>}
               <Button onClick={handleLogout} variant="outline" className="rounded-xl border-slate-200 hover:bg-slate-100 text-xs h-9 font-semibold">
                 <LogOut className="w-3.5 h-3.5 mr-1.5 text-slate-600" />
                 <span>{t('navbar.logout')}</span>
@@ -150,6 +179,18 @@ export function Navbar() {
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
         <div className="lg:hidden absolute top-20 left-0 w-full bg-white border-b border-slate-200 shadow-xl py-4 px-6 flex flex-col gap-4 z-40">
+          <button
+            onClick={() => { setIsMobileMenuOpen(false); openPaywall("manual"); }}
+            className="text-left font-bold text-teal-600 flex items-center justify-between p-3 rounded-2xl bg-teal-50 border border-teal-100"
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-teal-600" />
+              {isKz ? "Тарифтер (Standard & VIP)" : "Тарифные планы (Standard & VIP)"}
+            </span>
+            <span className="text-xs bg-teal-600 text-white px-2 py-0.5 rounded-lg">
+              {quota?.is_unlimited ? (isKz ? "Шексіз" : "Безлимит") : `${quota?.searches_used || 0}/20`}
+            </span>
+          </button>
           <Link href="/search" className="text-base font-semibold text-slate-800" onClick={() => setIsMobileMenuOpen(false)}>{t('navbar.services')}</Link>
           <Link href="/clinics" className="text-base font-semibold text-slate-800" onClick={() => setIsMobileMenuOpen(false)}>{t('navbar.clinics')}</Link>
           <Link href="/symptom-checker" className="text-base font-semibold text-teal-600 flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>

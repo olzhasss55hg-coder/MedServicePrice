@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import PriceChart from "@/components/ui/PriceChart";
 import { DoctorProfileModal } from "@/components/DoctorProfileModal";
 import { DualBookingModal } from "@/components/DualBookingModal";
-import { RouteDropdown } from "@/components/ui/RouteDropdown";
+import { build2GisRouteUrl, buildGoogleMapsRouteUrl } from "@/lib/maps";
 import { useTranslation } from "@/i18n/LanguageContext";
 import { api } from "@/lib/api";
 import type { Doctor } from "@/lib/types";
@@ -108,15 +108,24 @@ export function ClinicCard({
             <span>{city ? `${city}, ` : ""}{address}</span>
           </div>
 
-          {/* Unified Route Dropdown Button */}
-          <div className="mt-2">
-            <RouteDropdown
-              clinicName={clinicName}
-              city={city}
-              address={address}
-              latitude={latitude}
-              longitude={longitude}
-            />
+          {/* Direct Navigator Buttons */}
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <a
+              href={build2GisRouteUrl(clinicName, city, address, latitude, longitude)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-lime-50 hover:bg-lime-100 text-lime-900 border border-lime-200 text-xs font-bold transition-colors shadow-sm"
+            >
+              🧭 2GIS
+            </a>
+            <a
+              href={buildGoogleMapsRouteUrl(clinicName, city, address, latitude, longitude)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-bold transition-colors shadow-sm"
+            >
+              🗺️ Google Maps
+            </a>
           </div>
         </div>
 

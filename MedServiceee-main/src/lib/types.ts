@@ -120,9 +120,21 @@ export interface PromoCodeResponse {
 }
 
 export interface UserPlan {
-  plan: "free" | "pro" | "premium";
+  plan: "free" | "standard" | "premium" | "pro" | "vip";
   ai_requests_used: number;
   ai_limit?: number | null;
+  search_requests_used?: number;
+  search_limit?: number | null;
+  is_unlimited_search?: boolean;
+  priority_booking: boolean;
+}
+
+export interface SearchQuota {
+  searches_used: number;
+  search_limit: number | null;
+  remaining: number | null;
+  is_unlimited: boolean;
+  plan: "free" | "standard" | "premium" | "pro" | "vip" | string;
   priority_booking: boolean;
 }
 

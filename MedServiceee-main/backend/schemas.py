@@ -141,9 +141,36 @@ class UserResponse(BaseModel):
     plan: str = "free"
     ai_requests_used: int = 0
     ai_limit: Optional[int] = 20
+    search_requests_used: int = 0
+    search_limit: Optional[int] = 20
+    is_unlimited_search: bool = False
     priority_booking: bool = False
     
     model_config = ConfigDict(from_attributes=True)
+
+class SearchQuotaResponse(BaseModel):
+    searches_used: int = 0
+    search_limit: Optional[int] = 20
+    remaining: Optional[int] = 20
+    is_unlimited: bool = False
+    plan: str = "free"
+    priority_booking: bool = False
+
+class PlanResponse(BaseModel):
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    plan: str = "free"
+    search_requests_used: int = 0
+    search_limit: Optional[int] = 20
+    is_unlimited_search: bool = False
+    priority_booking: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PlanUpdate(BaseModel):
+    plan: str = Field(pattern="^(free|standard|premium|pro|vip)$")
+
 
 class Token(BaseModel):
     access_token: str
@@ -219,15 +246,6 @@ class PromoCodeResponse(BaseModel):
     discount_amount: float
     total_amount: float
     expires_at: Optional[datetime] = None
-
-class PlanResponse(BaseModel):
-    plan: str
-    ai_requests_used: int
-    ai_limit: Optional[int]
-    priority_booking: bool
-
-class PlanUpdate(BaseModel):
-    plan: str = Field(pattern="^(free|pro|premium)$")
 
 # Reviews
 class ReviewCreate(BaseModel):
