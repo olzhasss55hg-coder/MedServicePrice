@@ -84,3 +84,146 @@ body {
   border-radius: 16px !important;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
 }
+
+/* ==========================================================================
+   Accessibility Styles (Көзі нашар көретіндерге арналған нұсқа)
+   ========================================================================== */
+
+/* 1. Root & Body Font Size Scaling */
+html.a11y-font-normal,
+body.a11y-font-normal {
+  font-size: 100% !important;
+}
+
+html.a11y-font-lg,
+body.a11y-font-lg {
+  font-size: 118% !important;
+}
+
+html.a11y-font-xl,
+body.a11y-font-xl {
+  font-size: 138% !important;
+}
+
+body.a11y-active {
+  letter-spacing: 0.02em;
+}
+
+/* 2. Color Contrast Schemes */
+
+/* High Contrast: Pure Black Background, Crisp White Text */
+body.a11y-contrast-high {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  background-image: none !important;
+}
+
+body.a11y-contrast-high *:not(.leaflet-container):not(.leaflet-pane):not(.leaflet-pane *):not(.leaflet-tile):not(.a11y-panel):not(.a11y-panel *) {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-color: #ffffff !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body.a11y-contrast-high a:not(.a11y-panel *),
+body.a11y-contrast-high button:not(.a11y-panel *):not(.leaflet-container *) {
+  border: 1px solid #ffffff !important;
+  color: #ffffff !important;
+}
+
+body.a11y-contrast-high a:hover:not(.a11y-panel *) {
+  text-decoration: underline !important;
+  background-color: #222222 !important;
+}
+
+body.a11y-contrast-high input,
+body.a11y-contrast-high select,
+body.a11y-contrast-high textarea {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border: 2px solid #ffffff !important;
+}
+
+/* Monochrome: Pure White Background, Deep Black Text */
+body.a11y-contrast-mono {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  background-image: none !important;
+}
+
+body.a11y-contrast-mono *:not(.leaflet-container):not(.leaflet-pane):not(.leaflet-pane *):not(.leaflet-tile):not(.a11y-panel):not(.a11y-panel *) {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: #000000 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body.a11y-contrast-mono a:not(.a11y-panel *),
+body.a11y-contrast-mono button:not(.a11y-panel *):not(.leaflet-container *) {
+  border: 1px solid #000000 !important;
+  color: #000000 !important;
+}
+
+body.a11y-contrast-mono a:hover:not(.a11y-panel *) {
+  text-decoration: underline !important;
+  background-color: #f0f0f0 !important;
+}
+
+body.a11y-contrast-mono input,
+body.a11y-contrast-mono select,
+body.a11y-contrast-mono textarea {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 2px solid #000000 !important;
+}
+
+/* Yellow on Blue (Navy Blue Background, High-visibility Yellow Text) */
+body.a11y-contrast-yellow-blue {
+  background-color: #031b33 !important;
+  color: #ffff00 !important;
+  background-image: none !important;
+}
+
+body.a11y-contrast-yellow-blue *:not(.leaflet-container):not(.leaflet-pane):not(.leaflet-pane *):not(.leaflet-tile):not(.a11y-panel):not(.a11y-panel *) {
+  background-color: #031b33 !important;
+  color: #ffff00 !important;
+  border-color: #ffff00 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body.a11y-contrast-yellow-blue a:not(.a11y-panel *),
+body.a11y-contrast-yellow-blue button:not(.a11y-panel *):not(.leaflet-container *) {
+  border: 1px solid #ffff00 !important;
+  color: #ffff00 !important;
+}
+
+body.a11y-contrast-yellow-blue a:hover:not(.a11y-panel *) {
+  text-decoration: underline !important;
+  background-color: #092e54 !important;
+}
+
+body.a11y-contrast-yellow-blue input,
+body.a11y-contrast-yellow-blue select,
+body.a11y-contrast-yellow-blue textarea {
+  background-color: #021224 !important;
+  color: #ffff00 !important;
+  border: 2px solid #ffff00 !important;
+}
+
+/* 3. Image Filtering & Hiding (Never affects Leaflet map tiles & controls) */
+body.a11y-images-grayscale img:not(.leaflet-tile):not(.leaflet-marker-icon),
+body.a11y-images-grayscale picture,
+body.a11y-images-grayscale video {
+  filter: grayscale(100%) contrast(120%) !important;
+}
+
+body.a11y-images-hidden img:not(.leaflet-tile):not(.leaflet-marker-icon),
+body.a11y-images-hidden picture,
+body.a11y-images-hidden video {
+  opacity: 0.05 !important;
+  filter: grayscale(100%) !important;
+}
+

@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Search, Heart, User, Menu, LogOut, Network, Command, Stethoscope, Crown, Zap, Sparkles } from "lucide-react"
+import { Search, Heart, User, Menu, LogOut, Network, Command, Stethoscope, Crown, Zap, Sparkles, Glasses } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -9,10 +9,12 @@ import { useTranslation } from "@/i18n/LanguageContext"
 import { API_URL } from "@/lib/api"
 import { Badge } from "@/components/ui/Badge"
 import { usePaywall } from "@/components/PaywallContext"
+import { useAccessibility } from "@/components/AccessibilityContext"
 
 export function Navbar() {
   const { t, locale, setLocale } = useTranslation();
   const { quota, openPaywall } = usePaywall();
+  const { isEnabled: isA11yEnabled, toggleToolbar: toggleA11y, openToolbar: openA11y } = useAccessibility();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [plan, setPlan] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -126,7 +128,26 @@ export function Navbar() {
             </Link>
           </div>
           
-          <div className="flex gap-1 ml-2 mr-2 bg-slate-100 p-1 rounded-xl">
+          {/* Accessibility Mode Toggle */}
+          <button
+            type="button"
+            onClick={toggleA11y}
+            title={isKz ? "Көзі нашар көретіндерге арналған нұсқа" : "Версия для слабовидящих"}
+            aria-label={isKz ? "Көзі нашар көретіндерге арналған нұсқа" : "Версия для слабовидящих"}
+            aria-pressed={isA11yEnabled}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+              isA11yEnabled
+                ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-sm font-bold ring-2 ring-amber-300'
+                : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300'
+            }`}
+          >
+            <Glasses className="w-4 h-4 text-slate-700 shrink-0" />
+            <span className="hidden xl:inline">
+              {isKz ? "Көру режимі" : "Для слабовидящих"}
+            </span>
+          </button>
+
+          <div className="flex gap-1 ml-1 mr-2 bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => setLocale('ru')}
               className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-colors ${locale === 'ru' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
@@ -189,6 +210,18 @@ export function Navbar() {
             </span>
             <span className="text-xs bg-teal-600 text-white px-2 py-0.5 rounded-lg">
               {quota?.is_unlimited ? (isKz ? "Шексіз" : "Безлимит") : `${quota?.searches_used || 0}/20`}
+            </span>
+          </button>
+          <button
+            onClick={() => { setIsMobileMenuOpen(false); openA11y(); }}
+            className="text-left font-bold text-slate-900 flex items-center justify-between p-3 rounded-2xl bg-amber-50 border border-amber-200"
+          >
+            <span className="flex items-center gap-2">
+              <Glasses className="w-4 h-4 text-amber-600" />
+              {isKz ? "Көзі нашар көретіндерге арналған нұсқа" : "Версия для слабовидящих"}
+            </span>
+            <span className="text-xs bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded-lg">
+              A11Y
             </span>
           </button>
           <Link href="/search" className="text-base font-semibold text-slate-800" onClick={() => setIsMobileMenuOpen(false)}>{t('navbar.services')}</Link>

@@ -67,6 +67,9 @@ export default function SymptomCheckerPage() {
         city: selectedCity,
       });
       setResult(response);
+      setTimeout(() => {
+        window.scrollBy({ top: 350, behavior: 'smooth' });
+      }, 150);
     } catch (err) {
       console.error("Symptom analysis failed", err);
     } finally {

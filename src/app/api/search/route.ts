@@ -32,19 +32,62 @@ function normalizeCity(rawCity: string | null): string | null {
 function resolveCategory(query: string): string | null {
   if (!query) return null;
   const q = query.toLowerCase();
-  if (/(анализ|лаборатор|lab|blood|тест|оак|оам|қан|талдау|биохими|пцр|гормон|ферритин|витамин)/i.test(q)) {
+  if (/(анализ|лаборатор|lab|blood|тест|оак|оам|қан|талдау|биохими|пцр|гормон|ферритин|витамин|oak)/i.test(q)) {
     return 'laboratory';
   }
   if (/(прием|приём|врач|doctor|дәрігер|қабылдау|терапевт|педиатр|кардиолог|невропатолог|гинеколог|уролог|лор)/i.test(q)) {
     return 'doctor_appointment';
   }
-  if (/(узи|мрт|рентген|кт|диагностика|scanner|экг|эхокг|удз)/i.test(q)) {
+  if (/(узи|мрт|рентген|кт|диагностика|scanner|экг|эхокг|удз|mrt|mpt|mri|uzi|ct|xray)/i.test(q)) {
     return 'diagnostics';
   }
   if (/(процедура|укол|капельница|массаж|фгдс|инъекци)/i.test(q)) {
     return 'procedure';
   }
   return null;
+}
+
+function normalizeSearchToken(token: string): string[] {
+  const t = token.toLowerCase();
+  const variants = new Set<string>([t]);
+
+  const synonyms: Record<string, string[]> = {
+    mpt: ['мрт', 'томограф', 'магнитно-резонансная', 'mri'],
+    mrt: ['мрт', 'томограф', 'магнитно-резонансная', 'mri'],
+    mri: ['мрт', 'томограф', 'магнитно-резонансная'],
+    мрт: ['мрт', 'томограф', 'магнитно-резонансная', 'mrt', 'mpt', 'mri'],
+    uzi: ['узи', 'удз', 'ультразвук'],
+    узи: ['узи', 'удз', 'ультразвук', 'uzi'],
+    удз: ['узи', 'удз', 'ультразвук', 'uzi'],
+    oak: ['оак', 'общий анализ крови', 'қан'],
+    оак: ['оак', 'общий анализ крови', 'қан', 'oak'],
+    kt: ['кт', 'компьютерная томография', 'ct'],
+    кт: ['кт', 'компьютерная томография', 'kt'],
+  };
+
+  if (synonyms[t]) {
+    synonyms[t].forEach((s) => variants.add(s));
+  }
+
+  // Map visual homoglyphs (e.g. latin 'm' -> cyrillic 'м', 'p' -> 'р', 't' -> 'т')
+  const homoglyphs: Record<string, string> = {
+    a: 'а', b: 'в', e: 'е', k: 'к', m: 'м', h: 'н', o: 'о', p: 'р', c: 'с', t: 'т', x: 'х', y: 'у'
+  };
+  let cyrillicAttempt = '';
+  let hadHomoglyph = false;
+  for (const ch of t) {
+    if (homoglyphs[ch]) {
+      cyrillicAttempt += homoglyphs[ch];
+      hadHomoglyph = true;
+    } else {
+      cyrillicAttempt += ch;
+    }
+  }
+  if (hadHomoglyph) {
+    variants.add(cyrillicAttempt);
+  }
+
+  return Array.from(variants);
 }
 
 export async function GET(req: NextRequest) {
@@ -124,8 +167,9 @@ export async function GET(req: NextRequest) {
       const cName = (clinic.name || '').toLowerCase();
       const sCat = (service.category || '').toLowerCase();
 
+      const allTokens = qTokens.flatMap((token) => normalizeSearchToken(token));
       const matchesCat = queryCategory && sCat === queryCategory;
-      const matchesText = qTokens.some(
+      const matchesText = allTokens.some(
         (token) => sNorm.includes(token) || sRaw.includes(token) || cName.includes(token)
       );
 

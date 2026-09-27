@@ -63,42 +63,69 @@ export class SearchLimitExceededError extends Error {
 }
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const fullUrl = url.startsWith('http://') || url.startsWith('https://') 
+  const primaryUrl = url.startsWith('http://') || url.startsWith('https://') 
     ? url 
     : buildApiUrl(url);
 
   const sessionId = getSearchSessionId();
-  const res = await fetch(fullUrl, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Search-Session': sessionId,
-      ...options?.headers,
-    },
-    credentials: 'include',
-  });
+  const fetchHeaders = {
+    'Content-Type': 'application/json',
+    'X-Search-Session': sessionId,
+    ...options?.headers,
+  };
 
-  if (!res.ok) {
-    let errorDetail = `Request failed with status ${res.status}`;
-    let parsedData: any = null;
-    try {
-      parsedData = await res.json();
-      if (parsedData.detail) {
-        errorDetail = typeof parsedData.detail === 'string' ? parsedData.detail : JSON.stringify(parsedData.detail);
+  const executeFetch = async (targetUrl: string) => {
+    const res = await fetch(targetUrl, {
+      ...options,
+      headers: fetchHeaders,
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
+      let errorDetail = `Request failed with status ${res.status}`;
+      let parsedData: any = null;
+      try {
+        parsedData = await res.json();
+        if (parsedData.detail) {
+          errorDetail = typeof parsedData.detail === 'string' ? parsedData.detail : JSON.stringify(parsedData.detail);
+        }
+      } catch {}
+
+      if (res.status === 402 || (parsedData?.detail && parsedData.detail.limit_reached)) {
+        const msg = typeof parsedData?.detail?.message === 'string'
+          ? parsedData.detail.message
+          : 'Тегін іздеу лимиті (20) таусылды. Шексіз іздеу үшін тарифті таңдаңыз.';
+        throw new SearchLimitExceededError(msg, parsedData?.detail);
       }
-    } catch {}
 
-    if (res.status === 402 || (parsedData?.detail && parsedData.detail.limit_reached)) {
-      const msg = typeof parsedData?.detail?.message === 'string'
-        ? parsedData.detail.message
-        : 'Тегін іздеу лимиті (20) таусылды. Шексіз іздеу үшін тарифті таңдаңыз.';
-      throw new SearchLimitExceededError(msg, parsedData?.detail);
+      throw new Error(errorDetail);
     }
 
-    throw new Error(errorDetail);
-  }
+    return res.json() as Promise<T>;
+  };
 
-  return res.json();
+  try {
+    return await executeFetch(primaryUrl);
+  } catch (err: any) {
+    if (err instanceof SearchLimitExceededError) {
+      throw err;
+    }
+
+    // If external primaryUrl failed to connect (e.g., backend at localhost:8000 is not running),
+    // automatically fall back to the built-in Next.js local API route:
+    const isExternal = primaryUrl.startsWith('http://') || primaryUrl.startsWith('https://');
+    if (isExternal && typeof window !== 'undefined') {
+      try {
+        const parsed = new URL(primaryUrl);
+        const relativePath = parsed.pathname + parsed.search;
+        return await executeFetch(relativePath);
+      } catch {
+        // Fall through to throw original error
+      }
+    }
+
+    throw err;
+  }
 }
 
 export const api = {

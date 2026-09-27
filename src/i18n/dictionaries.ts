@@ -212,6 +212,19 @@ export const dictionaries = {
       desc: "Выберите удобное для вас приложение для навигации к клинике",
       open2gis: "2GIS-те ашу",
       openGoogle: "Google Maps-те ашу"
+    },
+    accessibility: {
+      toolbarTitle: "Версия для слабовидящих",
+      toggleButton: "Версия для слабовидящих",
+      toggleShort: "Для слабовидящих",
+      fontSize: "Размер шрифта",
+      contrast: "Цвета сайта",
+      images: "Изображения",
+      speech: "Звук",
+      speechPlay: "Озвучить",
+      speechStop: "Остановить",
+      reset: "Обычная версия",
+      close: "Закрыть"
     }
   },
   kk: {
@@ -635,10 +648,23 @@ export const dictionaries = {
       compareAll: "Compare prices in all {count} clinics"
     },
     routeModal: {
-      title: "Build Route",
-      desc: "Choose your preferred navigation app to reach the clinic",
-      open2gis: "Open in 2GIS",
-      openGoogle: "Open in Google Maps"
+      title: "Маршрут құру",
+      desc: "Клиникаға бару үшін ыңғайлы навигациялық қосымшаны таңдаңыз",
+      open2gis: "2GIS-те ашу",
+      openGoogle: "Google Maps-те ашу"
+    },
+    accessibility: {
+      toolbarTitle: "Көзі нашар көретіндерге арналған нұсқа",
+      toggleButton: "Көзі нашар көретіндерге арналған нұсқа",
+      toggleShort: "Көру режимі",
+      fontSize: "Қаріп өлшемі",
+      contrast: "Сайт түстері",
+      images: "Суреттер",
+      speech: "Дыбыс",
+      speechPlay: "Дыбыстау",
+      speechStop: "Тоқтату",
+      reset: "Қалыпты нұсқа",
+      close: "Жабу"
     }
   }
 };

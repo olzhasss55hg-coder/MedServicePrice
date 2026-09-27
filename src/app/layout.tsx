@@ -9,6 +9,8 @@ import { LanguageProvider } from "@/i18n/LanguageContext";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ToastProvider } from "@/components/ui/ToastContext";
 import { PaywallProvider } from "@/components/PaywallContext";
+import { AccessibilityProvider } from "@/components/AccessibilityContext";
+import { AccessibilityToolbar } from "@/components/AccessibilityToolbar";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -79,18 +81,21 @@ export default function RootLayout({
     <html lang="ru" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20">
         <LanguageProvider>
-          <ToastProvider>
-            <PaywallProvider>
-              <Navbar />
-              <main className="flex-1 flex flex-col">
-                {children}
-              </main>
-              <AIChatWidget />
-              <CommandPalette />
-              <Footer />
-              <BottomNav />
-            </PaywallProvider>
-          </ToastProvider>
+          <AccessibilityProvider>
+            <ToastProvider>
+              <PaywallProvider>
+                <AccessibilityToolbar />
+                <Navbar />
+                <main className="flex-1 flex flex-col">
+                  {children}
+                </main>
+                <AIChatWidget />
+                <CommandPalette />
+                <Footer />
+                <BottomNav />
+              </PaywallProvider>
+            </ToastProvider>
+          </AccessibilityProvider>
         </LanguageProvider>
       </body>
     </html>
